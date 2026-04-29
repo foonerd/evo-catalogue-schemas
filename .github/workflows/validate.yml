@@ -1,0 +1,80 @@
+name: validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  parse:
+    name: Parse every TOML file
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Today's CI is a TOML parse check only. Once evo-core
+      # v0.1.12 ships `evo-plugin-tool validate-shelf-schema`,
+      # this job swaps to invoking the tool against every
+      # schema file (see the commented stanza below). Until
+      # then, parse + structural sanity is the strongest
+      # check we can run without bootstrap circularity.
+      - name: Parse every TOML file
+        run: |
+          python3 - <<'PY'
+          import sys
+          import tomllib
+          from pathlib import Path
+
+          repo_root = Path('.').resolve()
+          schemas_dir = repo_root / 'schemas' / 'org.evoframework'
+
+          if not schemas_dir.exists():
+              print(f'no schemas directory yet at {schemas_dir} (scaffolding state)')
+              sys.exit(0)
+
+          tomls = sorted(schemas_dir.rglob('*.toml'))
+          if not tomls:
+              print('no .toml files found under', schemas_dir)
+              sys.exit(0)
+
+          failures = 0
+          for path in tomls:
+              rel = path.relative_to(repo_root)
+              try:
+                  with open(path, 'rb') as f:
+                      tomllib.load(f)
+                  print(f'ok: {rel}')
+              except Exception as exc:
+                  print(f'FAIL: {rel}: {exc}', file=sys.stderr)
+                  failures += 1
+
+          if failures:
+              print(f'\n{failures} TOML file(s) failed to parse', file=sys.stderr)
+              sys.exit(1)
+
+          print(f'\nall {len(tomls)} TOML file(s) parsed successfully')
+          PY
+
+      # Future: once evo-core v0.1.12 ships
+      # `evo-plugin-tool validate-shelf-schema`, replace the
+      # parse-only step above with the full validation:
+      #
+      # - name: Install evo-plugin-tool
+      #   env:
+      #     EVO_CORE_TAG: v0.1.12
+      #   run: |
+      #     cargo install \
+      #       --locked \
+      #       --git https://github.com/foonerd/evo-core \
+      #       --tag "$EVO_CORE_TAG" \
+      #       evo-plugin-tool
+      #
+      # - name: Validate every schema
+      #   run: ./tools/lint-all.sh
