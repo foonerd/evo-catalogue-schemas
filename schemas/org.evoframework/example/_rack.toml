@@ -1,0 +1,24 @@
+# Rack-level metadata for the `example` rack.
+#
+# The example rack hosts the worked-example shelf shapes a
+# plugin author reads to learn the framework's request /
+# response contract. Plugins targeting this rack are
+# illustrative; production distributions do not admit example
+# plugins by default.
+
+rack = "example"
+namespace = "org.evoframework"
+
+description = """
+Worked-example rack hosting reference shelf shapes for plugin
+authors learning the evo framework. Shelves under this rack
+exist for documentation purposes; production distributions
+typically do not declare this rack in their catalogue.
+"""
+
+# Shelves under this rack and their current shape version.
+# Each entry MUST have a corresponding `<shelf>.v<N>.toml`
+# file in this directory.
+[[shelves]]
+name = "echo"
+current_shape = 1
