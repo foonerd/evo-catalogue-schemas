@@ -1,0 +1,123 @@
+# Schema for the `networking.link` shelf at shape version 1.
+#
+# Link-control plugins manage network connections, scanning,
+# captive-portal flows, security posture, and flight-mode state
+# over a specific back-end (NetworkManager, systemd-networkd,
+# etc.). Cardinality is one plugin per device.
+#
+# Reference plugin: `org.evoframework.network.nm` in
+# evo-device-audio (NetworkManager back-end).
+
+schema_version = 1
+rack = "networking"
+shelf = "link"
+shape = 1
+
+description = """
+Network link-control shelf. Plugin implements connection
+management (status, scan, intent get/set/apply), captive-portal
+detection and flow (status/start/submit/complete), security
+posture (status, harden), and flight-mode coordination
+(get/set). Single-claimant per shelf.
+"""
+
+# 13 request_types declared in the reference plugin's manifest.
+# Per-verb payload contracts pending plugin-author review.
+
+[[requests]]
+request_type = "network.nm.status"
+description = "Returns current link state, active connection details, captive-portal status, and signal metrics."
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "network.nm.scan"
+description = "Triggers a Wi-Fi scan and returns the resulting access-point list with signal / security info."
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "network.nm.intent.get"
+description = "Returns the current connection intent (declared profile, autoconnect state, security parameters)."
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "network.nm.intent.set"
+description = "Updates the connection intent without applying. Apply is a separate verb."
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "network.nm.intent.apply"
+description = "Applies the current intent (connect / disconnect / reconfigure per the declared profile)."
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "network.nm.captive.status"
+description = "Returns captive-portal detection state (none, detected, in-flow, completed)."
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "network.nm.captive.start"
+description = "Initiates a captive-portal flow. Returns a session token consumed by submit/complete."
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "network.nm.captive.submit"
+description = "Submits captive-portal credentials (typically routed via user-interaction prompt)."
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "network.nm.captive.complete"
+description = "Marks the captive-portal session complete. Plugin verifies connectivity and returns final status."
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "network.nm.security.status"
+description = "Returns network-security posture (encryption type, weak-cipher warnings, MAC randomisation state)."
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "network.nm.security.harden"
+description = "Applies a hardened network-security configuration (per declared policy)."
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "network.nm.flight_mode.get"
+description = "Returns flight-mode state for the wireless rack-class. Coordinates with ADR-0039 flight-mode signal."
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "network.nm.flight_mode.set"
+description = "Sets flight-mode for the wireless rack-class. Per ADR-0039, emits FlightModeChanged happening on transition."
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[acceptance]]
+name = "link-single-claimant"
+detail = "Cardinality refused at admission if a second link-control plugin attempts admission to the same shelf."
+
+[[acceptance]]
+name = "link-non-panic-on-backend-loss"
+detail = "Per ADR-0039: plugin survives back-end loss (NetworkManager service stop) without panic. Returns structured error."
+
+[[acceptance]]
+name = "link-flight-mode-emits"
+detail = "flight_mode.set transitions emit `Happening::FlightModeChanged { rack_class: \"wireless\", on: <state> }` per ADR-0039."
+
+[[acceptance]]
+name = "link-captive-flow-non-blocking"
+detail = "Captive-portal flow does not block other request_types. Status / scan / flight_mode remain serviceable mid-flow."
+
+# NOTE: per-verb payload contracts pending plugin-author review.
+# Reviewing alongside `org.evoframework.network.nm`'s shipped
+# wire contract is a v0.2.0 release item for this schemas repo.

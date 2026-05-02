@@ -1,0 +1,32 @@
+# Rack-level metadata for the `audio` rack.
+#
+# The audio rack hosts brand-neutral framework-tier shelves
+# governing audio playback, composition, and (when added)
+# delivery. Plugins targeting these shelves implement the
+# reference audio device behaviour any vendor distribution
+# can adopt. Vendor-specific audio behaviour (cloud
+# integrations, partner DRM, hardware-specific drivers) lives
+# at the vendor distribution tier in the vendor's own
+# namespace, not in this rack.
+
+rack = "audio"
+namespace = "org.evoframework"
+
+description = """
+Brand-neutral audio rack hosting reference shelves for
+playback, composition, and delivery. Reference plugins live
+in evo-device-audio under `org.evoframework.*`; vendor
+distributions adopt this rack's shape and either admit the
+reference plugins directly or supply alternatives.
+"""
+
+# Shelves under this rack and their current shape version.
+# Each entry MUST have a corresponding `<shelf>.v<N>.toml`
+# file in this directory.
+[[shelves]]
+name = "playback"
+current_shape = 1
+
+[[shelves]]
+name = "composition"
+current_shape = 1

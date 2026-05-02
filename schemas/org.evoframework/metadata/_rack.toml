@@ -1,0 +1,23 @@
+# Rack-level metadata for the `metadata` rack.
+#
+# The metadata rack hosts brand-neutral framework-tier shelves
+# governing metadata resolution (title, artist, album, duration,
+# genre, etc.). Plugins targeting these shelves resolve metadata
+# from local libraries, embedded tags, online providers, or
+# fallback chains.
+
+rack = "metadata"
+namespace = "org.evoframework"
+
+description = """
+Brand-neutral metadata rack hosting reference shelves for
+metadata resolution. Reference plugin:
+`org.evoframework.metadata.local` in evo-device-audio
+(resolves from embedded ID3 tags + sidecar files in MPD
+library roots).
+"""
+
+# Shelves under this rack and their current shape version.
+[[shelves]]
+name = "providers"
+current_shape = 1

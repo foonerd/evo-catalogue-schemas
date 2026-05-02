@@ -1,0 +1,57 @@
+# Schema for the `audio.composition` shelf at shape version 1.
+#
+# Composition plugins compute target audio pipeline graphs from
+# the framework's current state (instructions + active source +
+# delivery target). They are pure compose-and-emit respondents:
+# given inputs, they produce a projection that a delivery warden
+# applies. Composition plugins do not touch hardware.
+#
+# Reference plugin: `org.evoframework.composition.alsa` in
+# evo-device-audio (composes ALSA pipeline graphs from processor
+# fragments and the active output).
+
+schema_version = 1
+rack = "audio"
+shelf = "composition"
+shape = 1
+
+description = """
+Composes a target audio pipeline projection from the
+framework's current state. Pure compose-and-emit; consumers
+read the resulting projection and downstream delivery wardens
+apply it. Composition plugins are stateless across requests
+beyond the projection cache.
+"""
+
+[[requests]]
+request_type = "alsa.pipeline.compose"
+description = """
+Compose an ALSA pipeline graph from the supplied processor
+fragments and the declared output target. Returns a projection
+suitable for the matching delivery warden's apply step.
+Reference plugin: `org.evoframework.composition.alsa`.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+# Acceptance criteria a plugin claiming to satisfy this shape
+# MUST meet. The framework does not enforce these at admission
+# (no runtime assertion harness yet); they document what a
+# future shape-conformance test would check.
+[[acceptance]]
+name = "compose-deterministic"
+detail = "Repeated compose(input) returns byte-identical projections across calls within a generation."
+
+[[acceptance]]
+name = "compose-no-side-effects"
+detail = "Composition does not touch hardware, persistence, or any external state. Composer is a pure function from input to projection."
+
+[[acceptance]]
+name = "compose-survives-empty-input"
+detail = "compose with an empty processor-fragment list returns a valid no-op projection rather than failing."
+
+# NOTE: payload_in / payload_out are marked `tbd-review` pending
+# plugin-author review. The schema's request_type list and
+# acceptance contract are stable; the wire payload shape is a
+# follow-up authoring step for the v0.2.0 release of this
+# schemas repo. See evo-catalogue-schemas CHANGELOG.

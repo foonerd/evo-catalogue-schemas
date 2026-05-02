@@ -1,0 +1,56 @@
+# Schema for the `audio.playback` shelf at shape version 1.
+#
+# Playback shelves host warden-shape plugins. A warden owns a
+# resource (the local audio playback device) and exposes the
+# `course_correct` verb for state-transition operations
+# (play / pause / seek / volume / source switch). Reference
+# plugin: `org.evoframework.playback.mpd` in evo-device-audio.
+#
+# WARDEN SHAPE — note this schema differs from respondent
+# shelves. Wardens do not declare `request_types`; they declare
+# `course_correct_verbs` per ADR-0049 (Runtime Capabilities
+# Dispatch Refinement). The framework gates dispatch at the
+# router against this declared verb set.
+
+schema_version = 1
+rack = "audio"
+shelf = "playback"
+shape = 1
+shape_kind = "warden"
+
+description = """
+Playback warden — owns the local audio playback device and
+exposes course_correct verbs for play / pause / seek / volume
+/ source state transitions. Wardens are single-claimant per
+shelf; consumers route playback intent through the framework's
+admission boundary, never directly to the warden.
+"""
+
+# course_correct verbs this shelf accepts. Per ADR-0049, the
+# warden's manifest declares `capabilities.warden.course_correct_verbs`;
+# the framework refuses any verb not in the declared set at
+# the router boundary before the warden's `course_correct`
+# body is invoked.
+#
+# NOTE: verb list TBD — pending plugin-author review of
+# `org.evoframework.playback.mpd`'s shipped contract. The
+# v0.2.0 release of this schemas repo lands the verb set with
+# payload shapes per verb.
+course_correct_verbs = ["tbd-review"]
+
+[[acceptance]]
+name = "warden-single-claimant"
+detail = "Only one playback warden may be admitted to this shelf at a time. Cardinality refused at admission."
+
+[[acceptance]]
+name = "warden-non-panic-on-dependency-loss"
+detail = "Per ADR-0039: warden survives dependency loss (audio device unavailable, ALSA driver crash) without panicking. Returns structured error to in-flight ops."
+
+[[acceptance]]
+name = "warden-course-correct-gated"
+detail = "Per ADR-0049: framework refuses any course_correct verb not in the manifest's declared `capabilities.warden.course_correct_verbs` list. Tested at admission via manifest-drift checks."
+
+# NOTE: this schema's full course_correct_verbs list and per-verb
+# payload contracts require plugin-author review against
+# `org.evoframework.playback.mpd` in evo-device-audio. Marked
+# tbd-review pending v0.2.0 of this schemas repo.

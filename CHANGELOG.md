@@ -7,8 +7,22 @@ versioning follows [Semver](https://semver.org).
 
 ## [Unreleased]
 
-(Pending changes accumulate here until a maintainer tags a
-release.)
+### Added — framework-tier shelves (v0.2.0 candidate)
+
+- `schemas/org.evoframework/audio/_rack.toml` — audio rack metadata.
+- `schemas/org.evoframework/audio/composition.v1.toml` — `audio.composition` shelf shape 1 (respondent; request_type `alsa.pipeline.compose`). Reference plugin: `org.evoframework.composition.alsa` in evo-device-audio.
+- `schemas/org.evoframework/audio/playback.v1.toml` — `audio.playback` shelf shape 1 (warden; `course_correct_verbs` TBD pending plugin-author review). Reference plugin: `org.evoframework.playback.mpd`.
+- `schemas/org.evoframework/artwork/_rack.toml` — artwork rack metadata.
+- `schemas/org.evoframework/artwork/providers.v1.toml` — `artwork.providers` shelf shape 1 (respondent; request_type `artwork.resolve`). Reference plugin: `org.evoframework.artwork.local`.
+- `schemas/org.evoframework/metadata/_rack.toml` — metadata rack metadata.
+- `schemas/org.evoframework/metadata/providers.v1.toml` — `metadata.providers` shelf shape 1 (respondent; request_type `metadata.query`). Reference plugin: `org.evoframework.metadata.local`.
+- `schemas/org.evoframework/networking/_rack.toml` — networking rack metadata.
+- `schemas/org.evoframework/networking/link.v1.toml` — `networking.link` shelf shape 1 (respondent; 13 request_types covering status, scan, intent, captive-portal, security, flight-mode). Reference plugin: `org.evoframework.network.nm`.
+
+### Notes
+
+- All new shelves' `payload_in` / `payload_out` fields are marked `tbd-review` pending plugin-author review of each reference plugin's wire contract. The schemas declare the request_type / verb sets and acceptance criteria authoritatively; payload shapes refine in a v0.2.0 follow-up.
+- These shelves correspond to the v0.1.12-era reference plugins shipped in evo-device-audio. Per ADR-0052 (evo-internal), the schemas-repo foot-locks to evo-core releases: every release that lands a new shelf MUST land its schema here.
 
 ## [0.1.0] — 2026-04-29
 

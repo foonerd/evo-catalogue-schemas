@@ -1,0 +1,51 @@
+# Schema for the `metadata.providers` shelf at shape version 1.
+#
+# Metadata-provider plugins resolve track / album / artist
+# metadata for media identifiers passed by consumer plugins.
+# Plugins implement a single query verb; the framework admits
+# multiple providers under the shelf and resolution strategy
+# is consumer-driven.
+#
+# Reference plugin: `org.evoframework.metadata.local` in
+# evo-device-audio.
+
+schema_version = 1
+rack = "metadata"
+shelf = "providers"
+shape = 1
+
+description = """
+Metadata-provider shelf. Plugins resolve track / album /
+artist / duration / genre metadata for a given media identifier
+and return a structured metadata record. Two manifest profiles
+("standard" and "extended") govern the field set the provider
+returns; consumers query at their declared profile.
+"""
+
+[[requests]]
+request_type = "metadata.query"
+description = """
+Resolve metadata for the supplied media identifier. Returns
+a structured record per the active profile (standard:
+title/artist/album/duration; extended: + genre, year, track
+number, disc number, etc.). Reference plugin:
+`org.evoframework.metadata.local`.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[acceptance]]
+name = "query-profile-respected"
+detail = "Plugin returns fields matching its declared `[metadata] profile` setting (standard or extended). Consumer queries at the lowest common profile across admitted providers."
+
+[[acceptance]]
+name = "query-not-found-is-structured"
+detail = "When the provider cannot resolve, returns a structured not-found response, not an error. Caller composes fallback across providers."
+
+[[acceptance]]
+name = "query-deterministic-per-input"
+detail = "query(id) returns the same metadata record across calls within the plugin's cache window."
+
+# NOTE: payload_in / payload_out are marked `tbd-review` pending
+# plugin-author review against `org.evoframework.metadata.local`'s
+# METADATA_QUERY_V1.md spec.

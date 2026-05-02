@@ -1,0 +1,23 @@
+# Rack-level metadata for the `networking` rack.
+#
+# The networking rack hosts brand-neutral framework-tier shelves
+# governing network link state, scanning, intent management,
+# captive-portal flows, security posture, and flight-mode
+# coordination. Reference plugin:
+# `org.evoframework.network.nm` in evo-device-audio (NetworkManager
+# back-end on Linux distributions).
+
+rack = "networking"
+namespace = "org.evoframework"
+
+description = """
+Brand-neutral networking rack hosting reference shelves for
+network link control. Plugins implement the contract over a
+specific back-end (NetworkManager, systemd-networkd, etc.);
+the framework admits one link-control plugin per device.
+"""
+
+# Shelves under this rack and their current shape version.
+[[shelves]]
+name = "link"
+current_shape = 1
