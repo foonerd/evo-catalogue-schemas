@@ -1,0 +1,23 @@
+# Rack-level metadata for the `artwork` rack.
+#
+# The artwork rack hosts brand-neutral framework-tier shelves
+# governing artwork resolution (album covers, station logos,
+# track thumbnails). Plugins targeting these shelves resolve
+# artwork URIs / blobs from local libraries, embedded tags,
+# online providers, or fallback chains.
+
+rack = "artwork"
+namespace = "org.evoframework"
+
+description = """
+Brand-neutral artwork rack hosting reference shelves for
+artwork resolution and caching. Reference plugin:
+`org.evoframework.artwork.local` in evo-device-audio (resolves
+artwork from embedded ID3 tags, sidecar files in MPD library
+roots, and configured fallback paths).
+"""
+
+# Shelves under this rack and their current shape version.
+[[shelves]]
+name = "providers"
+current_shape = 1

@@ -1,0 +1,52 @@
+# Schema for the `artwork.providers` shelf at shape version 1.
+#
+# Artwork-provider plugins resolve artwork (album covers,
+# station logos, track thumbnails) for media identifiers passed
+# by consumer plugins. Plugins implement a single resolve verb;
+# the framework admits multiple providers under the shelf and
+# may route by priority, capability, or first-match per consumer
+# strategy.
+#
+# Reference plugin: `org.evoframework.artwork.local` in
+# evo-device-audio (resolves from MPD library + embedded tags).
+
+schema_version = 1
+rack = "artwork"
+shelf = "providers"
+shape = 1
+
+description = """
+Artwork-provider shelf. Plugins resolve artwork for a given
+media identifier and return either a URI (for downstream fetch)
+or inline blob bytes. Multiple providers admit per shelf; the
+caller's resolution strategy decides priority order across the
+admitted set.
+"""
+
+[[requests]]
+request_type = "artwork.resolve"
+description = """
+Resolve artwork for the supplied media identifier. Returns a
+provider-specific representation (URI for remote fetch, inline
+blob for local files, or a structured not-found if the provider
+cannot resolve). Reference plugin:
+`org.evoframework.artwork.local`.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[acceptance]]
+name = "resolve-deterministic-per-input"
+detail = "resolve(id) returns the same artwork representation across calls within the plugin's cache window."
+
+[[acceptance]]
+name = "resolve-not-found-is-structured"
+detail = "When the provider cannot resolve, returns a structured not-found response, not an error. Caller composes fallback across providers."
+
+[[acceptance]]
+name = "resolve-no-network-unless-declared"
+detail = "Plugin must not perform outbound network fetches unless its manifest declares `prerequisites.outbound_network = true` (per BOUNDARY discipline)."
+
+# NOTE: payload_in / payload_out are marked `tbd-review` pending
+# plugin-author review against `org.evoframework.artwork.local`'s
+# wire contract.
