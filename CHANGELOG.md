@@ -7,6 +7,11 @@ versioning follows [Semver](https://semver.org).
 
 ## [Unreleased]
 
+### Added — `audio.composition` shape 2 (v0.2.0 candidate)
+
+- `schemas/org.evoframework/audio/composition.v2.toml` — `audio.composition` shelf shape 2 (respondent; request_type `composition.select_mode`). Aligns the shelf-of-record with the framework's audio data plane: typed `[capabilities.composition]` declaration with `input_kind` / `output_kind` / `modes` / `default_mode`, `LoadContext::audio_routing` consumption for substrate-configured `CompositionEndpoints`, `RouteChangeCallback` reaction to topology rewires, mode-aware `preserves_bit_perfect` gating. Reference plugin: `org.evoframework.composition.alsa` in evo-device-audio (passthrough mode against ALSA loopback). Shape 1's `alsa.pipeline.compose` string-templating contract was a v0.1.12-era abstraction superseded by the typed audio data plane; shape 1 remains historically published but is no longer the current shape.
+- `schemas/org.evoframework/audio/_rack.toml` — `audio.composition` `current_shape` bumped from 1 to 2.
+
 ### Added — framework-tier shelves (v0.2.0 candidate)
 
 - `schemas/org.evoframework/audio/_rack.toml` — audio rack metadata.

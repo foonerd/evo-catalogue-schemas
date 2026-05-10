@@ -1,0 +1,108 @@
+# Schema for the `audio.composition` shelf at shape version 2.
+#
+# Composition plugins occupy the middle stage of the audio
+# data plane: source → composition → delivery. The framework
+# configures topology (endpoint substrate + negotiated format)
+# and hands the composition plugin a typed
+# `CompositionEndpoints { input: ReadEndpoint, output: WriteEndpoint }`
+# pair via `LoadContext::audio_routing`. Audio bytes flow
+# through the OS-native primitive the framework selected
+# (ALSA loopback, named pipe, shared-memory region, JACK port);
+# they NEVER traverse the wire protocol or any SDK callback.
+#
+# A composition plugin declares `[capabilities.composition]`
+# with `input_kind`, `output_kind`, a non-empty `modes` list,
+# and a `default_mode`. Each declared mode carries a
+# `preserves_bit_perfect` flag the topology validator gates on.
+# The reconciliation engine picks one mode per topology after
+# intersecting source-produced format with delivery-accepted
+# format and applying operator policy.
+#
+# The respondent surface is the `composition.select_mode`
+# request: the framework calls into the plugin to rotate the
+# active mode; the plugin validates the requested mode is in
+# its declared list and switches the worker accordingly. Audio
+# byte processing is implicit — the plugin's worker drives the
+# endpoints continuously while the plugin is admitted; route
+# changes (topology rewires, format changes, hot-plug) trigger
+# the registered `RouteChangeCallback` so the worker can close
+# the old endpoints and reopen at the new format.
+#
+# Reference plugin: `org.evoframework.composition.alsa` in
+# evo-device-audio (passthrough mode against ALSA loopback;
+# further modes — eq_only, resampler, dsd_to_pcm — layer on as
+# subsequent commits without requiring a shape bump).
+
+schema_version = 1
+rack = "audio"
+shelf = "composition"
+shape = 2
+
+description = """
+Audio data plane composition stage. The framework configures
+endpoint substrate and negotiated format; the plugin opens
+the configured OS-native primitive and processes audio bytes
+through it. Plugins declare typed mode lists with bit-perfect
+flags; the reconciliation engine selects one mode per
+topology. The respondent surface rotates active mode;
+substrate handles audio byte flow.
+"""
+
+# Request types the framework dispatches against this shelf.
+# Composition plugins are respondents at the request layer
+# even though their primary work happens implicitly in a
+# worker driving the audio_routing endpoints.
+[[requests]]
+request_type = "composition.select_mode"
+description = """
+Rotate the active composition mode. The plugin validates the
+requested mode name is in its declared `[capabilities.composition].modes`
+list, switches the worker to that mode, and returns an ack.
+Refusal of an unknown mode name returns a structured
+contract refusal; the framework's reconciliation engine MUST
+NOT have offered a mode the plugin did not declare, so a
+refusal indicates a framework / catalogue drift the operator
+needs surfaced.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+# Acceptance criteria a plugin claiming to satisfy this shape
+# MUST meet. The framework does not enforce these at admission
+# (no runtime assertion harness yet); they document what a
+# future shape-conformance test would check.
+[[acceptance]]
+name = "composition-engages-audio-routing"
+detail = "Plugin consumes `LoadContext::audio_routing` at load time; refuses load loudly when `None`. The framework hands a `Some` only to plugins whose manifest declares `[capabilities.composition]`, so `None` indicates a manifest / trust misconfiguration that must surface, not be silently swallowed."
+
+[[acceptance]]
+name = "composition-declares-typed-modes"
+detail = "Plugin declares a non-empty `[capabilities.composition].modes` list; each mode names a stable token (`passthrough` / `eq_only` / `resampler` / `dsd_to_pcm` / etc.) and a `preserves_bit_perfect` boolean. `default_mode` names a mode in the list."
+
+[[acceptance]]
+name = "composition-honours-bit-perfect-claim"
+detail = "Modes declaring `preserves_bit_perfect = true` produce byte-identical output for the negotiated format. The topology validator refuses chains that claim bit-perfect but route through a stage whose active mode declares `false`."
+
+[[acceptance]]
+name = "composition-reacts-to-route-change"
+detail = "Plugin registers a `RouteChangeCallback` via `AudioRouting::on_route_change` at load. On every framework-fired route change (source switch, format change, composition mode change, delivery hot-plug), the plugin closes the old endpoints, calls `composition_endpoints()` for the new pair, and reopens the OS-native primitive at the new format before resuming byte flow."
+
+[[acceptance]]
+name = "composition-refuses-unknown-mode-name"
+detail = "`composition.select_mode` with a mode name not in the declared list returns a structured contract refusal carrying the requested name and the declared list. The plugin does not silently coerce to default."
+
+[[acceptance]]
+name = "composition-survives-endpoint-not-configured"
+detail = "Calls to `composition_endpoints()` returning `AudioRoutingError::EndpointNotConfigured` (admission ordering: plugin loaded before reconciliation has published a topology) surface as a structured pending state to the operator; the plugin retries briefly rather than panicking."
+
+[[acceptance]]
+name = "composition-no-audio-bytes-on-wire"
+detail = "Audio bytes flow exclusively through the OS-native primitive identified by the endpoints; the plugin MUST NOT serialise audio bytes onto any SDK callback, request response, or wire transport. Metering / spectrum / progress streams (derived from the audio data, not the data itself) are the only allowed control-plane projections."
+
+# NOTE: payload_in / payload_out for composition.select_mode
+# are marked `tbd-review` pending plugin-author review of the
+# reference `org.evoframework.composition.alsa`'s wire
+# contract. The schema's request_type list and acceptance
+# criteria are stable; the wire payload shape lands in a
+# follow-up authoring step. See evo-catalogue-schemas
+# CHANGELOG.
