@@ -31,7 +31,7 @@ versioning follows [Semver](https://semver.org).
 ### Notes
 
 - All new shelves' `payload_in` / `payload_out` fields are marked `tbd-review` pending plugin-author review of each reference plugin's wire contract. The schemas declare the request_type / verb sets and acceptance criteria authoritatively; payload shapes refine in a v0.2.0 follow-up.
-- These shelves correspond to the v0.1.12-era reference plugins shipped in evo-device-audio. Per ADR-0052 (evo-internal), the schemas-repo foot-locks to evo-core releases: every release that lands a new shelf MUST land its schema here.
+- These shelves correspond to the v0.1.12-era reference plugins shipped in evo-device-audio. The schemas-repo foot-locks to evo-core releases: every release that lands a new shelf MUST land its schema here.
 
 ## [0.1.0] — 2026-04-29
 

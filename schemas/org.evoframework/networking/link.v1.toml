@@ -92,13 +92,13 @@ payload_out = "tbd-review"
 
 [[requests]]
 request_type = "network.nm.flight_mode.get"
-description = "Returns flight-mode state for the wireless rack-class. Coordinates with ADR-0039 flight-mode signal."
+description = "Returns flight-mode state for the wireless rack-class. Coordinates with the framework's flight-mode signal."
 payload_in = "tbd-review"
 payload_out = "tbd-review"
 
 [[requests]]
 request_type = "network.nm.flight_mode.set"
-description = "Sets flight-mode for the wireless rack-class. Per ADR-0039, emits FlightModeChanged happening on transition."
+description = "Sets flight-mode for the wireless rack-class. Emits FlightModeChanged happening on transition."
 payload_in = "tbd-review"
 payload_out = "tbd-review"
 
@@ -108,11 +108,11 @@ detail = "Cardinality refused at admission if a second link-control plugin attem
 
 [[acceptance]]
 name = "link-non-panic-on-backend-loss"
-detail = "Per ADR-0039: plugin survives back-end loss (NetworkManager service stop) without panic. Returns structured error."
+detail = "Plugin survives back-end loss (NetworkManager service stop) without panic. Returns structured error."
 
 [[acceptance]]
 name = "link-flight-mode-emits"
-detail = "flight_mode.set transitions emit `Happening::FlightModeChanged { rack_class: \"wireless\", on: <state> }` per ADR-0039."
+detail = "flight_mode.set transitions emit `Happening::FlightModeChanged { rack_class: \"wireless\", on: <state> }`."
 
 [[acceptance]]
 name = "link-captive-flow-non-blocking"
