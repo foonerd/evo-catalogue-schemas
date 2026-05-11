@@ -108,6 +108,23 @@ description = "Returns the runtime supervisor's current reachability state (onli
 payload_in = "tbd-review"
 payload_out = "tbd-review"
 
+[[requests]]
+request_type = "network.nm.wifi_devices"
+description = "Returns the live Wi-Fi radio inventory — one row per kernel netdev with backing PHY, supported interface modes, concurrent managed+AP capability, per-band support (2.4 / 5 / 6 GHz), connection class (onboard vs USB), and virtual-AP-vif flag. Read-only; drives operator UI surface for STA / AP preferred-interface choice."
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+# Reactive bus taxonomy emitted by the supervisor's transition
+# watcher as `Happening::PluginEvent` instances. Listed here for
+# discoverability; payload contracts pending plugin-author
+# review alongside the wire-op payloads.
+#
+# event_type values:
+#   - network.reachability_changed        # state transitions
+#   - network.portal_detected             # captive-portal entry
+#   - network.critical_recovery_raised    # autonomous hotspot up
+#   - network.sta_restored                # autonomous STA rejoin
+
 [[acceptance]]
 name = "link-single-claimant"
 detail = "Cardinality refused at admission if a second link-control plugin attempts admission to the same shelf."
