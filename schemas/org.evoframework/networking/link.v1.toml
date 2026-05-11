@@ -102,6 +102,12 @@ description = "Sets flight-mode for the wireless rack-class. Emits FlightModeCha
 payload_in = "tbd-review"
 payload_out = "tbd-review"
 
+[[requests]]
+request_type = "network.nm.supervisor.status"
+description = "Returns the runtime supervisor's current reachability state (online / portal / limited / offline), critical-recovery flag, last-observations snapshot, and captive-portal URL when present. Read-only; the supervisor publishes state changes on a reactive subject for UI subscribers."
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
 [[acceptance]]
 name = "link-single-claimant"
 detail = "Cardinality refused at admission if a second link-control plugin attempts admission to the same shelf."
