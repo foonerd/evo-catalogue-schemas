@@ -4,8 +4,9 @@
 # governing network link state, scanning, intent management,
 # captive-portal flows, security posture, and flight-mode
 # coordination. Reference plugin:
-# `org.evoframework.network.nm` in evo-device-audio (NetworkManager
-# back-end on Linux distributions).
+# `org.evoframework.network` in evo-device-audio (NetworkManager
+# back-end on Linux distributions, with rtnetlink + polling
+# fallback when NetworkManager is absent).
 
 rack = "networking"
 namespace = "org.evoframework"

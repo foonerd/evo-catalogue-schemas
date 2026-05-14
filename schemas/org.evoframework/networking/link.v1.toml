@@ -5,7 +5,7 @@
 # over a specific back-end (NetworkManager, systemd-networkd,
 # etc.). Cardinality is one plugin per device.
 #
-# Reference plugin: `org.evoframework.network.nm` in
+# Reference plugin: `org.evoframework.network` in
 # evo-device-audio (NetworkManager back-end).
 
 schema_version = 1
@@ -114,6 +114,12 @@ description = "Returns the live Wi-Fi radio inventory — one row per kernel net
 payload_in = "tbd-review"
 payload_out = "tbd-review"
 
+[[requests]]
+request_type = "network.refresh_connectivity"
+description = "Triggers an on-demand connectivity-state refresh and returns the freshly-published `networking.link.connectivity` subject value. Honours the plugin's `probe_kind` config — when set to `off`, returns the subject without performing an HTTP probe (other connectivity fields are still re-evaluated). Read-side wire-op; no admin scope required."
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
 # Reactive bus taxonomy emitted by the supervisor's transition
 # watcher as `Happening::PluginEvent` instances. Listed here for
 # discoverability; payload contracts pending plugin-author
@@ -124,6 +130,75 @@ payload_out = "tbd-review"
 #   - network.portal_detected             # captive-portal entry
 #   - network.critical_recovery_raised    # autonomous hotspot up
 #   - network.sta_restored                # autonomous STA rejoin
+
+# Published subjects — read-able surface for UI, peer plugins,
+# and operator wire-op consumers.
+#
+# The link-control plugin publishes `networking.link.connectivity`
+# whenever it is admitted. The subject carries the current
+# connectivity verdict; it is updated on rtnetlink carrier /
+# route changes, NetworkManager D-Bus Connectivity /
+# PrimaryConnection signals, on-demand probe via the
+# `refresh_connectivity` wire-op, or the polling source's
+# adaptive-tick fallback (cold-start only). Consumers read the
+# subject through the framework's subject-state addressing; they
+# do NOT need to subscribe to the happenings stream.
+#
+# The subject's `internet_reachable` field carries the
+# probe verdict (`None` until first probe; `None` when
+# `probe_kind = off` and no probe has been requested). LAN
+# share-mount controllers gate on `carrier + ip_address +
+# default_gateway + dns_resolves` (no Internet needed for LAN
+# shares). Online-metadata consumers gate on `internet_reachable`.
+
+[[subjects]]
+name = "networking.link.connectivity"
+description = "Current connectivity verdict published by the link-control plugin. Updated on rtnetlink / NM events, on-demand probe via wire-op, or polling-source adaptive-tick cold-start fallback. Default `probe_kind = off` means `internet_reachable` reports `None` (no third-party probing without operator opt-in)."
+
+[[subjects.fields]]
+name = "interface_up"
+type = "bool"
+description = "At least one non-loopback interface is administratively up."
+
+[[subjects.fields]]
+name = "carrier"
+type = "bool"
+description = "At least one non-loopback interface has link carrier."
+
+[[subjects.fields]]
+name = "ip_address"
+type = "option<ip_addr>"
+description = "Preferred routable address (first non-link-local on the primary interface)."
+
+[[subjects.fields]]
+name = "default_gateway"
+type = "option<ip_addr>"
+description = "Current default-route next hop."
+
+[[subjects.fields]]
+name = "dns_resolves"
+type = "bool"
+description = "Last DNS resolution attempt succeeded."
+
+[[subjects.fields]]
+name = "internet_reachable"
+type = "option<bool>"
+description = "Last probe verdict. `None` until first probe; `None` indefinitely when `probe_kind = off`."
+
+[[subjects.fields]]
+name = "last_probe_at"
+type = "option<system_time>"
+description = "Timestamp of the last probe attempt regardless of verdict."
+
+[[subjects.fields]]
+name = "last_change_at"
+type = "system_time"
+description = "Timestamp of the last subject-state change."
+
+[[subjects.fields]]
+name = "source"
+type = "enum<rtnetlink|nm|polling|on_demand>"
+description = "Input that triggered the last subject update."
 
 [[acceptance]]
 name = "link-single-claimant"
@@ -142,5 +217,5 @@ name = "link-captive-flow-non-blocking"
 detail = "Captive-portal flow does not block other request_types. Status / scan / flight_mode remain serviceable mid-flow."
 
 # NOTE: per-verb payload contracts pending plugin-author review.
-# Reviewing alongside `org.evoframework.network.nm`'s shipped
+# Reviewing alongside `org.evoframework.network`'s shipped
 # wire contract is a v0.2.0 release item for this schemas repo.
