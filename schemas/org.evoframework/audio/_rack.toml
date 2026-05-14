@@ -30,3 +30,7 @@ current_shape = 1
 [[shelves]]
 name = "composition"
 current_shape = 2
+
+[[shelves]]
+name = "multiroom"
+current_shape = 1
