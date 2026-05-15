@@ -161,11 +161,11 @@ type = "i64"
 description = "Per-peer clock offset at the time this record was emitted, sourced from the audio-plane NTP-lite probe. `source_monotonic - receiver_monotonic`. Consumers reconstructing wall-clock-aligned timestamps subtract this value from receiver-monotonic fields. Captured at record-emit time so retrospective analyses can correct for the offset observed at that frame's transit, not the current one."
 
 # Per-device card envelope subject. One instance per
-# device-or-group entity in the household; the multi-room
+# device-or-group entity in the domain; the multi-room
 # plugin's source-host admission publishes the envelope for
 # every device + group it is the source-host for, and the
 # receiver-side admission publishes for itself when it is
-# not under a source-host's care. Together the household's
+# not under a source-host's care. Together the domain's
 # `audio.multiroom.device_card` subject instances cover
 # every device + group an operator's UI would render on the
 # multi-room shelf.
@@ -188,12 +188,12 @@ description = "Per-peer clock offset at the time this record was emitted, source
 
 [[subjects]]
 name = "audio.multiroom.device_card"
-description = "Per-device-or-group card envelope for the multi-room UI shelf. One instance per entity in the household; updated reactively on every underlying event (transport state, group membership, source-host election, clock-sync state, peer connection). The unified shape across solo / group / subgroup / master cases keeps the rendering surfaces one envelope; consumers discriminate by `transport_state` and the optional `master_group_context`."
+description = "Per-device-or-group card envelope for the multi-room UI shelf. One instance per entity in the domain; updated reactively on every underlying event (transport state, group membership, source-host election, clock-sync state, peer connection). The unified shape across solo / group / subgroup / master cases keeps the rendering surfaces one envelope; consumers discriminate by `transport_state` and the optional `master_group_context`."
 
 [[subjects.fields]]
 name = "device_or_group_id"
 type = "string"
-description = "Canonical id of the device or group this card represents. For solo devices: the device's own canonical id. For groups: the group's canonical id (the group entity in the source-host's `group_store`). Subject-instance key; uniquely identifies the card within the household."
+description = "Canonical id of the device or group this card represents. For solo devices: the device's own canonical id. For groups: the group's canonical id (the group entity in the source-host's `group_store`). Subject-instance key; uniquely identifies the card within the domain."
 
 [[subjects.fields]]
 name = "display_name"
@@ -330,7 +330,7 @@ description = "Entity has not been observed on the audio-plane recently. Cards r
 
 [[subjects.enums.transport_state]]
 name = "unpaired"
-description = "Entity is discovered via mDNS but not yet admitted to the household. Cards render a + overlay + `Unpaired (admit?)` badge; tap dispatches the admission confirmation flow."
+description = "Entity is discovered via mDNS but not yet admitted to the domain. Cards render a + overlay + `Unpaired (admit?)` badge; tap dispatches the admission confirmation flow."
 
 [[subjects.enums.transport_state]]
 name = "revoked"
@@ -346,7 +346,7 @@ detail = "Cards MUST be fed via the framework's subject-state subscription subst
 
 [[acceptance]]
 name = "multiroom-device-card-instance-per-entity"
-detail = "Exactly one `audio.multiroom.device_card` instance per device-or-group entity in the household. The publishing admission (source-host for group entities and member-care entities; receiver-role admission for solo / unmanaged entities) is the single authoritative source for each instance."
+detail = "Exactly one `audio.multiroom.device_card` instance per device-or-group entity in the domain. The publishing admission (source-host for group entities and member-care entities; receiver-role admission for solo / unmanaged entities) is the single authoritative source for each instance."
 
 [[acceptance]]
 name = "multiroom-device-card-theme-placeholder-fallback"
