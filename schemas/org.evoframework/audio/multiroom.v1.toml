@@ -160,6 +160,198 @@ name = "clock_offset_ns"
 type = "i64"
 description = "Per-peer clock offset at the time this record was emitted, sourced from the audio-plane NTP-lite probe. `source_monotonic - receiver_monotonic`. Consumers reconstructing wall-clock-aligned timestamps subtract this value from receiver-monotonic fields. Captured at record-emit time so retrospective analyses can correct for the offset observed at that frame's transit, not the current one."
 
+# Per-device card envelope subject. One instance per
+# device-or-group entity in the household; the multi-room
+# plugin's source-host admission publishes the envelope for
+# every device + group it is the source-host for, and the
+# receiver-side admission publishes for itself when it is
+# not under a source-host's care. Together the household's
+# `audio.multiroom.device_card` subject instances cover
+# every device + group an operator's UI would render on the
+# multi-room shelf.
+#
+# The envelope shape is the realisation of the universal
+# collection presentation pattern (see the public design-doc
+# mirror) for the multi-room domain — state-to-visual
+# mapping per transport state, unified shape across solo /
+# group / subgroup / master cases, reactive subject binding
+# so the UI receives transitions within sub-second of the
+# underlying event without polling. Cards consume one
+# instance each; widget kinds rendering them live in the
+# multi-room plugin's manifest.
+#
+# Subject naming: instances are keyed `audio.multiroom.
+# device_card/<device_or_group_id>` (the subject-substrate's
+# generic instance-keying pattern). Consumers subscribe to
+# the type and receive every instance update; the
+# `device_or_group_id` field discriminates.
+
+[[subjects]]
+name = "audio.multiroom.device_card"
+description = "Per-device-or-group card envelope for the multi-room UI shelf. One instance per entity in the household; updated reactively on every underlying event (transport state, group membership, source-host election, clock-sync state, peer connection). The unified shape across solo / group / subgroup / master cases keeps the rendering surfaces one envelope; consumers discriminate by `transport_state` and the optional `master_group_context`."
+
+[[subjects.fields]]
+name = "device_or_group_id"
+type = "string"
+description = "Canonical id of the device or group this card represents. For solo devices: the device's own canonical id. For groups: the group's canonical id (the group entity in the source-host's `group_store`). Subject-instance key; uniquely identifies the card within the household."
+
+[[subjects.fields]]
+name = "display_name"
+type = "string"
+description = "Operator-visible name. Devices: the operator-editable display name from `admin device identity show`. Groups: the operator-supplied display name from `admin group create / rename`."
+
+[[subjects.fields]]
+name = "state_badge"
+type = "state_badge"
+description = "Operator-visible state badge per the universal state-to-visual mapping. Discriminates between Solo, Leader-of-group, Member-of-group, Subgroup-of-master, Master-group, and the transport-state-specific badges (Stopped / Idle / Offline / Unpaired / Revoked)."
+
+[[subjects.fields]]
+name = "transport_state"
+type = "transport_state"
+description = "Current transport state of the entity. Drives card content per the state-to-visual mapping: Playing / Paused render live artwork + title; Stopped / Idle / Offline / Unpaired / Revoked render the theme-placeholder + the corresponding state badge."
+
+[[subjects.fields]]
+name = "current_track"
+type = "option<track_summary>"
+description = "Track currently loaded on the entity, when transport_state is Playing or Paused. None for Stopped / Idle / Offline / Unpaired / Revoked. The artwork-or-icon fallback (when artwork_url is None) honours the universal artwork-first-or-icon rule."
+
+[[subjects.fields]]
+name = "theme_placeholder_artwork_url"
+type = "string"
+description = "URL of the theme-contributed device-placeholder artwork. Rendered when transport_state is Stopped / Idle / Offline / Unpaired / Revoked, or when current_track.artwork_url is None. Per-device themed (the operator's chosen aesthetic propagates to the multi-room view); a missing theme falls back to the framework-default neutral evo glyph."
+
+[[subjects.fields]]
+name = "master_group_context"
+type = "option<master_group_context>"
+description = "Set when the entity is a member of a master group (subgroup extension lands in a follow-on release). Carries the master group's id + display name and the operator-configured per-member delay readback alongside the audible-time-honest computed delay. None in the current release (flat groups only)."
+
+[[subjects.fields]]
+name = "last_update_at"
+type = "system_time"
+description = "Wall-clock timestamp of the last envelope refresh. Operator surfaces render `<n>s ago` style staleness indicators; reactive consumers ignore the field (they receive transitions on the underlying happenings)."
+
+# Track summary record. Populated only when transport_state is
+# Playing or Paused. The artist + album fields exist for
+# richer overlay variants; cards may render them or hide
+# them per their view-mode (List view typically renders
+# title + state-badge; Tile view typically renders artwork
+# + title overlay).
+[[subjects.record_types.track_summary]]
+name = "artwork_url"
+type = "option<string>"
+description = "URL of the track artwork. Served by the framework's HTTPS artwork endpoint with a size discriminator on the URL path (the multi-size pipeline). None falls back to the theme placeholder per the artwork-first-or-icon rule."
+
+[[subjects.record_types.track_summary]]
+name = "title"
+type = "string"
+description = "Track title from the playback source's `audio.playback.current` subject."
+
+[[subjects.record_types.track_summary]]
+name = "artist"
+type = "option<string>"
+description = "Track artist when known. None for sources that do not surface artist metadata (radio streams, sample tracks, etc.). Available for richer overlay variants; List view typically hides this field; Tile view may render it on hover or as a second line."
+
+[[subjects.record_types.track_summary]]
+name = "album"
+type = "option<string>"
+description = "Track album when known. Same semantics as `artist`."
+
+# Master-group context record. Set when the entity is a
+# member of a master group (subgroup extension; follow-on release). The
+# audible-time field is computed per the §4.8
+# honest-degradation telemetry; consumers render it
+# alongside (or in place of) the configured delay so the
+# operator sees what the device actually plays, not what
+# the configuration claims it plays.
+[[subjects.record_types.master_group_context]]
+name = "master_group_id"
+type = "string"
+description = "Canonical id of the master group this entity is a member of."
+
+[[subjects.record_types.master_group_context]]
+name = "master_group_name"
+type = "string"
+description = "Operator-visible display name of the master group."
+
+[[subjects.record_types.master_group_context]]
+name = "delay_ms"
+type = "i32"
+description = "Operator-configured per-member delay for this entity within the master group (per-member-delay tuning lands in a follow-on release). Negative values indicate the entity plays earlier than the group's reference; positive values indicate later."
+
+[[subjects.record_types.master_group_context]]
+name = "audible_time_ms"
+type = "i32"
+description = "Computed per-member audible-time relative to the master-group reference, honoured per the universal §4.8 honest-degradation contract. Consumers render this alongside the configured delay so the operator sees the actual play offset, not the intended offset."
+
+# State badge enum. Distinguishes between role badges and
+# transport-state badges; consumers render the correct
+# visual treatment per the universal state-to-visual mapping.
+[[subjects.enums.state_badge]]
+name = "solo"
+description = "Entity is a solo device (not a member of any group)."
+
+[[subjects.enums.state_badge]]
+name = "leader_of_group"
+description = "Entity is the source-host (leader) of a group. The group's name follows in the operator-visible rendering."
+
+[[subjects.enums.state_badge]]
+name = "member_of_group"
+description = "Entity is a non-leader member of a group. The group's name + the source-host's display name follow in the operator-visible rendering."
+
+[[subjects.enums.state_badge]]
+name = "subgroup_of_master"
+description = "Entity is a subgroup within a master group (master-group hierarchy lands in a follow-on release)."
+
+[[subjects.enums.state_badge]]
+name = "master_group"
+description = "Entity is itself a master group (master-group hierarchy lands in a follow-on release)."
+
+# Transport state enum. Operator-visible per the
+# state-to-visual mapping in the public design-doc mirror.
+[[subjects.enums.transport_state]]
+name = "playing"
+description = "Audio is playing on this entity. Cards render live artwork + title."
+
+[[subjects.enums.transport_state]]
+name = "paused"
+description = "Audio is loaded and paused on this entity. Cards render live artwork + title + a pause overlay."
+
+[[subjects.enums.transport_state]]
+name = "stopped"
+description = "Audio playback is stopped. Cards render theme placeholder + `Stopped` badge."
+
+[[subjects.enums.transport_state]]
+name = "idle"
+description = "No source loaded. Cards render theme placeholder + `Idle` badge."
+
+[[subjects.enums.transport_state]]
+name = "offline"
+description = "Entity has not been observed on the audio-plane recently. Cards render dimmed theme placeholder + `Offline` badge."
+
+[[subjects.enums.transport_state]]
+name = "unpaired"
+description = "Entity is discovered via mDNS but not yet admitted to the household. Cards render a + overlay + `Unpaired (admit?)` badge; tap dispatches the admission confirmation flow."
+
+[[subjects.enums.transport_state]]
+name = "revoked"
+description = "Entity was previously admitted and has been operator-revoked. Cards render dimmed theme placeholder + `Revoked` badge; non-interactive until re-admitted."
+
+[[acceptance]]
+name = "multiroom-device-card-envelope-unified-across-cases"
+detail = "The `MultiroomDeviceCardEnvelope` value shape MUST be identical across solo device, group leader, group member, subgroup, and master-group entities. Discrimination by transport_state + state_badge + master_group_context only; no per-case envelope variants."
+
+[[acceptance]]
+name = "multiroom-device-card-reactive-subject-binding"
+detail = "Cards MUST be fed via the framework's subject-state subscription substrate: every card subscribes once at mount and receives every subsequent transition reactively until unmount. Polling for refresh is non-conformant."
+
+[[acceptance]]
+name = "multiroom-device-card-instance-per-entity"
+detail = "Exactly one `audio.multiroom.device_card` instance per device-or-group entity in the household. The publishing admission (source-host for group entities and member-care entities; receiver-role admission for solo / unmanaged entities) is the single authoritative source for each instance."
+
+[[acceptance]]
+name = "multiroom-device-card-theme-placeholder-fallback"
+detail = "When the operator's active theme contributes no placeholder artwork (theme broken, theme not yet loaded, etc.), the publisher MUST fall back to the framework-default neutral evo glyph. Telemetry records placeholder-fallback events so operators can debug a missing theme."
+
 [[acceptance]]
 name = "multiroom-single-source-per-group"
 detail = "Cardinality refused at admission if a second source-role multi-room plugin attempts admission for the same group."
