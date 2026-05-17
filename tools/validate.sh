@@ -4,8 +4,8 @@
 # Usage:
 #   ./tools/validate.sh schemas/org.evoframework/<rack>/<shelf>.v<N>.toml
 #
-# Requires `evo-plugin-tool` (from evo-core v0.1.12+) on PATH,
-# or the path passed via $EVO_PLUGIN_TOOL environment variable.
+# Requires `evo-plugin-tool` (from a recent evo-core release) on
+# PATH, or the path passed via $EVO_PLUGIN_TOOL environment variable.
 
 set -euo pipefail
 
@@ -30,6 +30,6 @@ if ! command -v "$evo_plugin_tool" >/dev/null 2>&1; then
 fi
 
 # Run the schema validation. validate-shelf-schema is shipped
-# in evo-core v0.1.12+; older evo-core releases do not have
-# this subcommand.
+# in recent evo-core releases; older evo-core releases do not
+# have this subcommand.
 exec "$evo_plugin_tool" validate-shelf-schema --schema "$schema_path"

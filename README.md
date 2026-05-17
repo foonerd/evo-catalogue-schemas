@@ -74,7 +74,7 @@ shipping:
 # Clone (or check out a pinned tag) into a known location.
 git clone -b v0.1.0 https://github.com/foonerd/evo-catalogue-schemas /path/to/schemas
 
-# Validate your plugin against the schemas (evo-plugin-tool from evo-core v0.1.12+).
+# Validate your plugin against the schemas (evo-plugin-tool from a recent evo-core release).
 evo-plugin-tool validate-shelf-schema \
   --schemas-path=/path/to/schemas/schemas \
   --plugin=path/to/your/plugin.toml

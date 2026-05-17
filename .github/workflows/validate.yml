@@ -19,12 +19,12 @@ jobs:
         with:
           python-version: '3.11'
 
-      # Today's CI is a TOML parse check only. Once evo-core
-      # v0.1.12 ships `evo-plugin-tool validate-shelf-schema`,
-      # this job swaps to invoking the tool against every
-      # schema file (see the commented stanza below). Until
-      # then, parse + structural sanity is the strongest
-      # check we can run without bootstrap circularity.
+      # Today's CI is a TOML parse check only. Once a recent
+      # evo-core release ships `evo-plugin-tool
+      # validate-shelf-schema`, this job swaps to invoking the
+      # tool against every schema file (see the commented stanza
+      # below). Until then, parse + structural sanity is the
+      # strongest check we can run without bootstrap circularity.
       - name: Parse every TOML file
         run: |
           python3 - <<'PY'
@@ -62,13 +62,13 @@ jobs:
           print(f'\nall {len(tomls)} TOML file(s) parsed successfully')
           PY
 
-      # Future: once evo-core v0.1.12 ships
+      # Future: once a recent evo-core release ships
       # `evo-plugin-tool validate-shelf-schema`, replace the
       # parse-only step above with the full validation:
       #
       # - name: Install evo-plugin-tool
       #   env:
-      #     EVO_CORE_TAG: v0.1.12
+      #     EVO_CORE_TAG: <evo-core release tag>
       #   run: |
       #     cargo install \
       #       --locked \

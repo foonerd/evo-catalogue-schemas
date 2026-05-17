@@ -91,6 +91,6 @@ ships the migrated shape against shape v2.
 Shape v1 stays admittable through the catalogue's
 `shape_supports` window for one minor release of evo-core
 after v2 lands, then closes. Shape v1 ships no production
-plugins outside the v0.1.12-era reference; the migration
+plugins outside the earlier reference; the migration
 window exists for documentation completeness rather than
 real-world plugin churn.

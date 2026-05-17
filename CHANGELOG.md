@@ -9,11 +9,11 @@ versioning follows [Semver](https://semver.org).
 
 ### Filled in — `audio.playback` v1 contract closures (v0.2.0 candidate)
 
-- `schemas/org.evoframework/audio/playback.v1.toml` — replaced the v0.1.12-era `course_correct_verbs = ["tbd-review"]` placeholder with the documented contract from the reference plugin `org.evoframework.playback.mpd`: seven verbs (`play`, `pause`, `stop`, `next`, `previous`, `seek`, `set_volume`) with per-verb `payload_in` / `payload_out` shapes, plus two additional acceptance criteria covering payload-versioning-by-encoding and set_volume clamping. No shape bump — the v1 schema's verb list and payload contracts were always meant to be filled in once the reference plugin's contract stabilised; this is the closure of that placeholder.
+- `schemas/org.evoframework/audio/playback.v1.toml` — replaced the earlier `course_correct_verbs = ["tbd-review"]` placeholder with the documented contract from the reference plugin `org.evoframework.playback.mpd`: seven verbs (`play`, `pause`, `stop`, `next`, `previous`, `seek`, `set_volume`) with per-verb `payload_in` / `payload_out` shapes, plus two additional acceptance criteria covering payload-versioning-by-encoding and set_volume clamping. No shape bump — the v1 schema's verb list and payload contracts were always meant to be filled in once the reference plugin's contract stabilised; this is the closure of that placeholder.
 
 ### Added — `audio.composition` shape 2 (v0.2.0 candidate)
 
-- `schemas/org.evoframework/audio/composition.v2.toml` — `audio.composition` shelf shape 2 (respondent; request_type `composition.select_mode`). Aligns the shelf-of-record with the framework's audio data plane: typed `[capabilities.composition]` declaration with `input_kind` / `output_kind` / `modes` / `default_mode`, `LoadContext::audio_routing` consumption for substrate-configured `CompositionEndpoints`, `RouteChangeCallback` reaction to topology rewires, mode-aware `preserves_bit_perfect` gating. Reference plugin: `org.evoframework.composition.alsa` in evo-device-audio (passthrough mode against ALSA loopback). Shape 1's `alsa.pipeline.compose` string-templating contract was a v0.1.12-era abstraction superseded by the typed audio data plane; shape 1 remains historically published but is no longer the current shape.
+- `schemas/org.evoframework/audio/composition.v2.toml` — `audio.composition` shelf shape 2 (respondent; request_type `composition.select_mode`). Aligns the shelf-of-record with the framework's audio data plane: typed `[capabilities.composition]` declaration with `input_kind` / `output_kind` / `modes` / `default_mode`, `LoadContext::audio_routing` consumption for substrate-configured `CompositionEndpoints`, `RouteChangeCallback` reaction to topology rewires, mode-aware `preserves_bit_perfect` gating. Reference plugin: `org.evoframework.composition.alsa` in evo-device-audio (passthrough mode against ALSA loopback). Shape 1's `alsa.pipeline.compose` string-templating contract was an earlier abstraction superseded by the typed audio data plane; shape 1 remains historically published but is no longer the current shape.
 - `schemas/org.evoframework/audio/_rack.toml` — `audio.composition` `current_shape` bumped from 1 to 2.
 
 ### Added — framework-tier shelves (v0.2.0 candidate)
@@ -31,7 +31,7 @@ versioning follows [Semver](https://semver.org).
 ### Notes
 
 - All new shelves' `payload_in` / `payload_out` fields are marked `tbd-review` pending plugin-author review of each reference plugin's wire contract. The schemas declare the request_type / verb sets and acceptance criteria authoritatively; payload shapes refine in a v0.2.0 follow-up.
-- These shelves correspond to the v0.1.12-era reference plugins shipped in evo-device-audio. The schemas-repo foot-locks to evo-core releases: every release that lands a new shelf MUST land its schema here.
+- These shelves correspond to the reference plugins shipped in evo-device-audio. The schemas-repo foot-locks to evo-core releases: every release that lands a new shelf MUST land its schema here.
 
 ## [0.1.0] — 2026-04-29
 
