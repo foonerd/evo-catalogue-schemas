@@ -113,6 +113,37 @@ the implicit clear.
 payload_in = "tbd-review"
 payload_out = "tbd-review"
 
+[[requests]]
+request_type = "hardware.audio.verify_install"
+description = """
+Operator-readable self-test for the plugin's runtime
+preconditions. Returns a structured verdict over four
+independent probes:
+
+  1. board profile resolution — the host's board class
+     (Raspberry Pi, Tinkerboard, ...) was identified by
+     /proc/device-tree/model or /proc/cpuinfo, NOT left
+     at "Unknown".
+  2. catalogue admission — the embedded catalogue parsed
+     at load and includes at least one entry for the
+     resolved board profile.
+  3. privileged-write grant — `sudo -n -l` returns the
+     plugin's path-scoped Cmnd_Alias entries; the
+     drop-in installed by the distribution bootstrap is
+     present and addressable.
+  4. modder staging directory — the operator-overlay
+     staging directory (per-distribution layout) exists
+     and is writable by the steward service user.
+
+Read-only; idempotent. Operator UI surfaces the verdict so
+the bootstrap-not-yet-run failure mode is observable BEFORE
+the operator attempts a write that would silently fail at
+the sudo step. Each probe's failure is operator-readable +
+actionable, not a stack trace.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
 # Acceptance criteria a plugin claiming to satisfy this shape
 # MUST meet. The framework does not enforce these at admission
 # (no runtime assertion harness yet); they document what a
@@ -141,6 +172,10 @@ detail = "Every write that flips the on-disk state emits a hardware.audio.reboot
 [[acceptance]]
 name = "transparent-legacy-block-migration"
 detail = "A managed block left behind by prior tooling (e.g. Volumio's banner) is migrated to the evo banner on the next select_dac without operator intervention."
+
+[[acceptance]]
+name = "verify-install-probes-runtime-preconditions"
+detail = "verify_install returns a structured verdict over four independent probes (board profile resolved, catalogue non-empty, privileged-write grant present, modder staging directory writable); each probe reports ok / failed with an operator-readable diagnostic; the verb is read-only and idempotent."
 
 # Subjects the plugin announces. Consumers (audio.delivery,
 # audio.playback wardens, UI plugins) resolve the addressings
