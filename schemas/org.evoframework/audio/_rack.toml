@@ -28,6 +28,10 @@ name = "playback"
 current_shape = 1
 
 [[shelves]]
+name = "options"
+current_shape = 2
+
+[[shelves]]
 name = "composition"
 current_shape = 2
 
