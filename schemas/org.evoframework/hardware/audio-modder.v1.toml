@@ -1,0 +1,165 @@
+# Schema for the `hardware.audio-modder` shelf at shape version 1.
+#
+# Hardware-audio-modder plugins admit operator-uploaded device-
+# tree-blob overlays (`.dtbo` files) as user-overlay catalog
+# entries that merge with the base catalog. The reference
+# distribution defaults this surface ON to support the DIY
+# audience; vendor distributions override the distribution-tier
+# config flag to refuse modder gestures with a structured error.
+#
+# Three load-bearing safety mechanisms:
+#
+# 1. SHA-256 content-addressed allowlist. Every DTBO blob is
+#    hashed; the hash must appear in the operator-signed
+#    `allowlist.signed` file before the plugin will register the
+#    overlay or write it to the boot-config managed block. The
+#    allowlist itself is verified against the operator's vendor
+#    signing key; an allowlist whose signature does not verify
+#    is refused outright.
+#
+# 2. Per-DAC `advanced_settings_enabled` gate. A user-overlay
+#    catalog row that targets a base-catalog DAC with
+#    advanced_settings_enabled = false is refused. The base
+#    catalog's flag is authoritative; modder rows cannot
+#    override it.
+#
+# 3. Two-step confirm on the wire-op surface. register_overlay
+#    requires the operator to supply a confirmation token in the
+#    payload (`CONFIRM:<dac_id>` literal); the plugin refuses
+#    register gestures whose token does not match the supplied
+#    dac_id verbatim. Prevents accidental or replayed registers.
+#
+# Reference plugin: `org.evoframework.hardware.audio-config` in
+# evo-device-audio stocks this shelf alongside its existing
+# hardware.audio + hardware.audio-dsp shelves.
+
+schema_version = 1
+rack = "hardware"
+shelf = "audio-modder"
+shape = 1
+
+description = """
+Operator-extensible DTBO-based hardware overlay surface. Admits
+user-uploaded device-tree-blob overlays as catalog rows that
+merge with the base catalog under a deterministic conflict
+policy. SHA-256 content-addressed against an operator-signed
+allowlist; two-step-confirmed on register; refusable per-DAC
+via the base catalog's advanced_settings_enabled flag AND at
+the distribution-tier via a config flag vendor distributions
+override.
+"""
+
+# Request types the framework dispatches against this shelf.
+
+[[requests]]
+request_type = "hardware.audio.modder.list_overlays"
+description = """
+Return the list of currently-registered user-overlay catalog
+rows. Each entry carries the catalog id (collision-resolved
+when the operator supplied an id matching a base-catalog row),
+the DTBO file path on the host, the SHA-256 digest, the
+provenance string (`modder:<overlay-name>`), the registration
+timestamp, and the activation state (active / staged /
+refused). Refused entries surface with the structured refusal
+variant string so operators can diagnose without journal-
+grepping.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "hardware.audio.modder.register_overlay"
+description = """
+Register a new user-overlay catalog row from an operator-
+uploaded DTBO blob plus the row metadata (id, display name,
+overlay token, alsa_card_hint, dsp_options, etc.). Validates,
+in order: (1) the distribution-tier modder-config flag is
+true; (2) the operator-signed allowlist's signature verifies;
+(3) the supplied SHA-256 digest matches the DTBO blob bytes
+AND the digest appears in the allowlist; (4) the
+confirmation_token field equals the literal `CONFIRM:<dac_id>`;
+(5) the merged catalog (base + user overlay) has no
+unresolved id collisions unless the row sets
+`override = true` AND the base entry's
+advanced_settings_enabled is true. On success, copies the
+DTBO blob to `/boot/firmware/overlays/<id>.dtbo` (or the
+board's equivalent), persists the row to
+`/etc/evo/hardware/audio/overlays/<id>.toml`, emits a
+hardware.audio.modder.overlay_registered happening,
+republishes the modder_overlays subject. The plugin does NOT
+auto-apply the new overlay; the operator must follow up with
+hardware.audio.select_dac against the new catalog id (the
+modder catalog row is now visible in the unified
+list_dac_catalogue surface).
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "hardware.audio.modder.remove_overlay"
+description = """
+Remove a registered user-overlay catalog row. Deletes the
+overlay's toml metadata file and the DTBO blob. If the
+overlay is currently active (the boot-config managed block
+references it), the plugin refuses with a structured error
+naming the conflict — operator must hardware.audio.clear_dac
+or select a different DAC first. Emits
+hardware.audio.modder.overlay_removed on success.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+# Subjects the plugin announces.
+
+[[subjects]]
+addressing = { scheme = "evo.hardware.audio", value = "modder_overlays" }
+subject_type = "hardware_audio_modder_overlays"
+description = """
+List of registered user-overlay catalog rows + their activation
+states. State refreshes on every successful register_overlay /
+remove_overlay. UI uses this to populate the modder pane
+alongside the base catalog's catalogue subject; the per-row
+provenance string distinguishes modder rows from
+volumio:dacs.json-imported rows.
+"""
+
+# Acceptance criteria.
+
+[[acceptance]]
+name = "modder-surface-distribution-toggleable"
+detail = "register_overlay / remove_overlay return AdvancedSettingsDisabled (with distribution-tier diagnostic) when the plugin config's [advanced_settings] enabled flag is false. The vendor distribution's config override is honoured at the distribution-tier layer independently of the per-DAC catalog flag."
+
+[[acceptance]]
+name = "sha256-content-addressed"
+detail = "register_overlay refuses any DTBO blob whose SHA-256 digest does not appear in the operator-signed allowlist (HashMismatch) and any blob whose digest differs from the supplied digest in the request payload (DigestMismatch). The allowlist file's own Ed25519 signature verifies against the operator's vendor signing key before any allowlist lookup; signature failure refuses with SignatureRefused."
+
+[[acceptance]]
+name = "two-step-confirm"
+detail = "register_overlay requires a confirmation_token field equal to the literal `CONFIRM:<dac_id>` where <dac_id> matches the row's id. Mismatches refuse with ConfirmationTokenMismatch. UI surfaces a separate confirm widget for this gesture; the operator types the dac_id explicitly."
+
+[[acceptance]]
+name = "per-dac-flag-respected"
+detail = "register_overlay refuses a row whose id collides with a base-catalog DAC having advanced_settings_enabled = false, EVEN when override = true is supplied. The base catalog's per-DAC flag is authoritative; user-overlay rows cannot bypass it."
+
+[[acceptance]]
+name = "deterministic-merge-policy"
+detail = "On register_overlay, the merged catalog (base + user-overlay union) is computed deterministically: rows are keyed by (board profile, id); user-overlay rows with override = false refuse when a base row with the same key exists; user-overlay rows with override = true replace the base row only when the base row's advanced_settings_enabled is true."
+
+[[acceptance]]
+name = "active-overlay-refuses-remove"
+detail = "remove_overlay refuses when the currently-active dtoverlay token (read from the hardware.audio active_config subject) matches the overlay row's overlay token. Operator must select_dac to a different row OR clear_dac before remove_overlay can proceed."
+
+[[acceptance]]
+name = "structured-failure-variants-enumerated"
+detail = "Every verb's error surface enumerates variants explicitly: AdvancedSettingsDisabled / SignatureRefused / HashMismatch / DigestMismatch / AllowlistEntryMissing / ConfirmationTokenMismatch / CollidesWithBaseCatalog / OverlayActive / DtboFileMissing / DtboWriteFailed. The wire payload carries the variant discriminator + an operator-readable diagnostic. No anonymous string errors."
+
+[[acceptance]]
+name = "user-overlay-rows-merged-into-catalogue-subject"
+detail = "Registered user-overlay catalog rows surface in the existing capabilities subject's catalog list (the unified base + modder view) so UI plugins can render every available DAC through one surface. The per-row provenance string distinguishes the source."
+
+# NOTE: payload_in / payload_out are marked `tbd-review` pending
+# plugin-author review. The schema's request_type list, subject
+# contract, happening contract (overlay_registered /
+# overlay_removed / overlay_refused), and acceptance criteria
+# are stable; the wire payload shapes land in a follow-up
+# authoring step.

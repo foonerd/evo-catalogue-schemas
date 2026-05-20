@@ -39,3 +39,7 @@ current_shape = 1
 [[shelves]]
 name = "audio-dsp"
 current_shape = 1
+
+[[shelves]]
+name = "audio-modder"
+current_shape = 1
