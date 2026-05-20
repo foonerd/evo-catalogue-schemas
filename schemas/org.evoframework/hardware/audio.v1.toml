@@ -1,0 +1,186 @@
+# Schema for the `hardware.audio` shelf at shape version 1.
+#
+# Hardware-audio-config plugins own the device's audio-hardware
+# catalogue and the boot-time descriptor that enables a chosen
+# DAC. They publish three capability subjects: the supported
+# catalogue (filtered by the host's resolved board profile),
+# the currently-applied active configuration (overlay token +
+# resolved ALSA card + mixer hints), and a pending-reboot flag
+# that flips on every successful write the operator must
+# reboot to actuate.
+#
+# Plugins on this shelf are reactive respondents: their writes
+# touch the host's boot config (e.g. Pi `dtoverlay=` block),
+# not the running ALSA pipeline. The runtime audio plugins
+# (audio.delivery, audio.playback) consume this shelf's
+# `active_config` subject to bind their pieces without
+# re-probing the host. Selection persists across reboots in
+# the boot-config file itself; no plugin-side state file is
+# needed for the catalogue selection.
+#
+# Reference plugin: `org.evoframework.hardware.audio-config`
+# in evo-device-audio (Pi dtoverlay back-end on
+# Raspberry Pi-class boards, NoopProvider absorbing other
+# board classes until concrete providers land).
+
+schema_version = 1
+rack = "hardware"
+shelf = "audio"
+shape = 1
+
+description = """
+Operator-facing audio-hardware enablement projection.
+Surfaces the DAC catalogue (filtered by board profile),
+writes the boot-config dtoverlay block on operator gestures,
+publishes catalogue / active-config / pending-reboot
+subjects. Subscribed audio plugins (delivery, playback) read
+the active-config subject for ALSA card + mixer binding.
+Reactive-only shape; no audio data plane; selection persists
+in the host's boot config.
+"""
+
+# Request types the framework dispatches against this shelf.
+# Read verbs return the current projection; write verbs touch
+# the host's boot config and signal reboot-required via the
+# pending_reboot subject + a hardware.audio.reboot_required
+# happening.
+
+[[requests]]
+request_type = "hardware.audio.list_dac_catalogue"
+description = """
+Return the catalogue of supported audio-hardware entries for
+the host's resolved board profile (e.g. Raspberry PI). Each
+entry carries the catalogue id, display name, dtoverlay
+token, ALSA card short id, mixer-control hint, optional ID
+EEPROM string list, optional I2C address hint, and the
+per-row needs-reboot flag. Empty catalogue when the board
+profile is not represented in the bundled catalogue (e.g.
+generic x86 hosts); operators understand the gesture is
+inapplicable on this board class.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "hardware.audio.select_dac"
+description = """
+Apply a catalogue entry by id: validate the entry exists for
+the resolved board profile, validate the dtoverlay grammar,
+write the banner-fenced managed block to the host's boot
+config, install companion module load directives where
+relevant, refresh the active_config + pending_reboot
+subjects, emit a hardware.audio.reboot_required happening.
+The host must reboot for the new overlay to take effect; the
+plugin does NOT touch the running ALSA pipeline.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "hardware.audio.clear_dac"
+description = """
+Clear the host's managed block from the boot config. No-op
+when no managed block was present (still returns ok, but
+the pending_reboot subject does NOT flip). After clearing,
+the host falls back to the board's default audio path on
+next boot.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "hardware.audio.current_config"
+description = """
+Return the host's currently-applied configuration: the
+dtoverlay token in the managed block (empty when no managed
+block is present), the resolved catalogue id + ALSA card
+hint + mixer hint via catalogue lookup, and the boot-config
+path the read happened from. Operator-facing read; idempotent.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "hardware.audio.confirm_reboot_required"
+description = """
+Return the pending_reboot subject's state: whether the
+operator must reboot for the most recent write to take
+effect, the operator-readable cause string, and the
+timestamp the flag was last flipped. UI uses this to surface
+a reboot prompt; the operator's reboot acknowledgement is
+the implicit clear.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+# Acceptance criteria a plugin claiming to satisfy this shape
+# MUST meet. The framework does not enforce these at admission
+# (no runtime assertion harness yet); they document what a
+# future shape-conformance test would check.
+
+[[acceptance]]
+name = "catalogue-board-filtered"
+detail = "list_dac_catalogue returns entries only for the host's resolved board profile; entries for other profiles do not surface."
+
+[[acceptance]]
+name = "select-writes-banner-fenced-block"
+detail = "select_dac writes the managed block fenced by a single banner header + a single dtoverlay= line; content outside the block is untouched."
+
+[[acceptance]]
+name = "select-flips-pending-reboot"
+detail = "select_dac flips the pending_reboot subject to pending = true; clear_dac flips it when the on-disk state actually changed."
+
+[[acceptance]]
+name = "active-config-from-on-disk-truth"
+detail = "current_config + the active_config subject reflect the dtoverlay token in the on-disk managed block, NOT a plugin-side state file; absence of a managed block surfaces as overlay = empty string."
+
+[[acceptance]]
+name = "reboot-required-happening-on-write"
+detail = "Every write that flips the on-disk state emits a hardware.audio.reboot_required happening with the operator-readable cause."
+
+[[acceptance]]
+name = "transparent-legacy-block-migration"
+detail = "A managed block left behind by prior tooling (e.g. Volumio's banner) is migrated to the evo banner on the next select_dac without operator intervention."
+
+# Subjects the plugin announces. Consumers (audio.delivery,
+# audio.playback wardens, UI plugins) resolve the addressings
+# below against the framework's subject querier and subscribe
+# via SubjectStateSubscriber.
+
+[[subjects]]
+addressing = { scheme = "evo.hardware.audio", value = "capabilities" }
+subject_type = "hardware_audio_capabilities"
+description = """
+DAC catalogue filtered by the host's resolved board profile,
+plus the resolved profile string itself. State refreshes
+when the catalogue is reloaded (rare; v1 ships the catalogue
+embedded in the plugin binary).
+"""
+
+[[subjects]]
+addressing = { scheme = "evo.hardware.audio", value = "active_config" }
+subject_type = "hardware_audio_active_config"
+description = """
+Currently-applied configuration: dtoverlay token in the
+managed block, resolved catalogue id + ALSA card hint +
+mixer hint, boot-config path the read happened from. State
+refreshes on every successful select_dac / clear_dac.
+Subscribed audio plugins (delivery, playback) read this to
+bind their pieces without re-probing the host.
+"""
+
+[[subjects]]
+addressing = { scheme = "evo.hardware.audio", value = "pending_reboot" }
+subject_type = "hardware_audio_pending_reboot"
+description = """
+Boolean flag + operator-readable cause + timestamp. Flips to
+pending = true on every successful select_dac / clear_dac
+that changed the on-disk state. UI surfaces this as a
+reboot prompt.
+"""
+
+# NOTE: payload_in / payload_out are marked `tbd-review` pending
+# plugin-author review. The schema's request_type list,
+# acceptance contract, and subject contract are stable; the
+# wire payload shape is a follow-up authoring step for the
+# v0.2.0 release of this schemas repo.

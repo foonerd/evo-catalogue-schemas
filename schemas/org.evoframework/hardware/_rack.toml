@@ -1,0 +1,37 @@
+# Rack-level metadata for the `hardware` rack.
+#
+# The hardware rack hosts brand-neutral framework-tier shelves
+# governing device-class-specific hardware enablement: the
+# operator's view of the physical interfaces the device can be
+# configured to use, the catalogue of supported components, and
+# the projection of the host's currently-applied configuration.
+#
+# Plugins on this rack are NOT data-plane plugins — they neither
+# move bytes nor manage runtime sessions. Their job is **enable
+# the hardware and surface the choice**: write the boot-time
+# kernel-overlay descriptor, install companion module load
+# directives, expose the supported-hardware catalogue, signal
+# when a reboot is required for an operator gesture to take
+# effect. The runtime data-plane plugins (audio, networking,
+# ...) bind against the hardware-rack plugins' published
+# capability subjects to learn the host's resolved active
+# configuration without re-probing the OS.
+
+rack = "hardware"
+namespace = "org.evoframework"
+
+description = """
+Brand-neutral hardware-enablement rack. Plugins on this rack
+surface the device's hardware catalogue, write the host's
+boot-time descriptor (e.g. Pi dtoverlay block), and publish the
+operator-visible capability subjects downstream data-plane
+plugins react against. Not a data plane; not a runtime session
+plane; enablement only.
+"""
+
+# Shelves under this rack and their current shape version.
+# Each entry MUST have a corresponding `<shelf>.v<N>.toml`
+# file in this directory.
+[[shelves]]
+name = "audio"
+current_shape = 1
