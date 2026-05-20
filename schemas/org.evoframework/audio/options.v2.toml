@@ -305,6 +305,14 @@ detail = "Every transition fires the lifecycle happenings in the operator-observ
 name = "mixer-transition-hardware-mode-requires-device-and-control"
 detail = "Setting `mixer_type = hardware` without populating `mixer_device` + `mixer_control` MUST refuse with a structured Permanent error naming both required fields. Degrade-to-software fallback IS permitted only when the operator explicitly requested it via a separate gesture; silent automatic degrade on a missing coordinate is a contract violation (operator picked hardware for a reason; the safe response is to surface the gap, not paper over it)."
 
+[[acceptance]]
+name = "mixer-transition-envelope-coordination"
+detail = "The orchestrator coordinates the safety envelope's mute / unmute steps with the playback warden via two paired subjects. (1) `evo.audio.mixer_transition:envelope_requested` — orchestrator-published. State: `{ generation: u64, requested_state: \"muted\" | \"unmuted\", requested_at_ms: u64 }`. Each transition's pre-mute step bumps the generation and publishes `requested_state = muted`; the unmute step bumps again and publishes `requested_state = unmuted`. (2) `evo.audio.mixer_transition:envelope_observed` — playback-warden-published acknowledgement. State: `{ generation: u64, observed_state: \"muted\" | \"unmuted\", observed_at_ms: u64 }`. The warden subscribes to envelope_requested, mutes / unmutes its playback chain in response (e.g. MPD pause / resume), and publishes envelope_observed with the matching generation when the chain has actually transitioned. The orchestrator subscribes to envelope_observed and advances to the next state-machine step ONLY when it observes a matching `(generation, requested_state)` pair within a bounded timeout. Timeout → rollback chain. The generation field disambiguates concurrent transitions (which the per-plugin transition lock already prevents but the protocol carries belt-and-suspenders defence)."
+
+[[acceptance]]
+name = "mixer-transition-lifecycle-emitter-is-orchestrator"
+detail = "The four `audio.mixer_transition.*` lifecycle happenings (started / applied / rolled_back / failed) are emitted by the orchestrator (the playback.options-shape plugin) ONLY. Subordinate plugins (audio.delivery, audio.playback) MUST NOT emit these happenings themselves; downstream observers (UI affordances, audit tooling) subscribe to the orchestrator-emitted stream as the single canonical source of mixer-transition lifecycle state. Subordinates communicate their step-completion via the envelope_observed subject (above), not via lifecycle happenings."
+
 # NOTE: payload_in / payload_out for the eight request
 # types are marked `tbd-review` pending plugin-author
 # review of the reference `org.evoframework.playback.options`'s
