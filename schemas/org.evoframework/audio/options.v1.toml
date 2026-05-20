@@ -1,0 +1,161 @@
+# Schema for the `audio.options` shelf at shape version 1.
+#
+# Options plugins host operator-facing audiophile-grade
+# settings for the reference audio chain: resampling
+# preference, mixer type, DSD-over-PCM enablement, output
+# device selection, volume normalisation. The plugin
+# publishes the `audio.options.settings` subject as the
+# operational source of truth; subscribed plugins
+# (`audio.delivery` plugins, `audio.playback` wardens)
+# observe the subject and reconfigure in place on operator
+# gestures, avoiding admission churn.
+#
+# Plugins on this shelf are reactive respondents: they own
+# no audio data plane, they own the settings projection.
+# Settings persist under the plugin's state directory
+# (`/var/lib/evo/<plugin-name>/state.toml`); the framework
+# guarantees per-plugin filesystem isolation. On restart the
+# plugin rehydrates from this file; absence is treated as
+# the documented defaults.
+#
+# Reference plugin: `org.evoframework.playback.options` in
+# evo-device-audio.
+
+schema_version = 1
+rack = "audio"
+shelf = "options"
+shape = 1
+
+description = """
+Operator-facing audiophile settings projection for the
+reference audio chain. Publishes the audio.options.settings
+subject; subscribed plugins (delivery, playback warden)
+react in place on operator gestures. Reactive-only shape;
+no audio data plane.
+"""
+
+# Request types the framework dispatches against this
+# shelf. The read verb returns the current settings; each
+# write verb validates + persists + updates the subject;
+# the framework's subject substrate fans the change out to
+# every subscriber.
+[[requests]]
+request_type = "options.get_settings"
+description = """
+Return the current settings projection: resampling /
+mixer_type / dop / output_device / volume_normalization.
+Operator-facing read verb; idempotent.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "options.set_resampling"
+description = """
+Set the resampling preference (target sample rate, enable
+flag). Validates the requested rate against the host's
+hardware-supported set (sourced from audio.delivery's
+probe_hardware response); persists; updates the subject.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "options.set_mixer_type"
+description = """
+Set the mixer type (`hardware` / `software` / `none`).
+Affects the delivery plugin's pcm chain reconstruction:
+hardware binds the active card's mixer; software inserts
+the platform's software-volume node; none refuses volume
+control.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "options.set_dop"
+description = """
+Enable / disable DoP (DSD over PCM) packing for
+DSD-capable DACs. Validates the host's DAC declares
+`dsd_capable = true` (sourced from audio.delivery's
+probe_hardware response); persists; updates the subject.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "options.set_output_device"
+description = """
+Set the bound output device (ALSA card / hw: descriptor,
+platform equivalent). Validates the device exists on the
+host (sourced from audio.delivery's list_cards response);
+persists; updates the subject. Subscribers react: the
+delivery plugin rewires the modular pcm chain to point at
+the new device.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "options.set_volume_normalization"
+description = """
+Set the volume normalisation policy (`disabled` /
+`track` / `album` / `loudness_lufs`). Persists; updates
+the subject. Playback wardens (e.g. playback.mpd)
+re-evaluate per-track on the next play.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "options.restore_last_known_good"
+description = """
+Restore the most-recently-known-working settings snapshot
+(the framework's LKG mechanism for operator-recoverable
+misconfiguration). Persists the LKG; updates the subject;
+all subscribers reconfigure.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "options.reset_to_defaults"
+description = """
+Reset the settings to the documented defaults
+(`resampling = off`, `mixer_type = software`,
+`dop = false`, `output_device = first listed by
+delivery`, `volume_normalization = disabled`). Persists;
+updates the subject; subscribers reconfigure.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+# Acceptance criteria a plugin claiming to satisfy this
+# shape MUST meet.
+[[acceptance]]
+name = "options-publishes-settings-subject"
+detail = "Plugin publishes the `audio.options.settings` subject at load time, populated with the rehydrated state (or defaults if no persisted state exists). The subject's schema declares the typed field set listed above; subscribers consume via `subscribe_subjects = true`."
+
+[[acceptance]]
+name = "options-persists-on-write"
+detail = "Each `set_*` verb persists the updated state to the plugin's state directory before returning success. A plugin crash between persist and subject update is acceptable; a plugin returning success without persisting is a contract violation."
+
+[[acceptance]]
+name = "options-rehydrates-on-restart"
+detail = "On load, the plugin reads its persisted state and republishes the subject with the loaded values. Absence of persisted state is treated as defaults; partial / corrupt files trigger the LKG fallback if available, defaults otherwise. The plugin MUST NOT panic on file-system errors."
+
+[[acceptance]]
+name = "options-validates-against-hardware"
+detail = "Write verbs that touch hardware-bound state (set_resampling, set_output_device, set_dop) MUST validate the requested value against the audio.delivery shelf's probe responses before accepting. Refusal carries a structured contract error naming the offending field and the validated alternatives."
+
+[[acceptance]]
+name = "options-reactive-only-lifecycle"
+detail = "Plugin's manifest declares `lifecycle.mode = \"reactive-only\"`. Operator TOML edits do NOT trigger admission churn; the actuation path is the subject substrate. The plugin MUST NOT require a teardown + re-admit cycle to apply settings changes."
+
+# NOTE: payload_in / payload_out for the eight request
+# types are marked `tbd-review` pending plugin-author
+# review of the reference `org.evoframework.playback.options`'s
+# wire contract. The schema's request_type list,
+# subscriber surface, and acceptance criteria are stable;
+# the wire payload shapes land in a follow-up authoring
+# step. See evo-catalogue-schemas CHANGELOG.

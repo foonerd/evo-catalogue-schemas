@@ -1,0 +1,133 @@
+# Schema for the `audio.delivery` shelf at shape version 2.
+#
+# Delivery plugins occupy the terminal stage of the audio
+# data plane: source → composition → delivery → DAC. The
+# framework configures topology (endpoint substrate +
+# negotiated format) and hands the delivery plugin a typed
+# `ReadEndpoint` via `LoadContext::audio_routing`. Audio
+# bytes flow through the OS-native primitive the framework
+# selected (ALSA pcm, named pipe, shared-memory region);
+# they NEVER traverse the wire protocol or any SDK callback.
+#
+# A delivery plugin declares `[capabilities.delivery]` with
+# `input_kind`, `device`, an `exclusive_mode` flag, a
+# `bit_perfect_capable` flag, and a non-empty list of
+# accepted `[[capabilities.delivery.audio_formats]]`. The
+# reconciliation engine intersects this list with each
+# source-produced format set and applies operator policy
+# (preferred topology, bit-perfect priority) to pick one
+# format per topology rewire.
+#
+# The respondent surface exposes operator-facing
+# introspection of the host's audio hardware: which cards /
+# mixers / formats are present at runtime. The settings
+# layer (publisher: `audio.options`) drives this plugin via
+# the same surface to bind a chosen output device. Audio
+# byte processing is implicit — the plugin's worker drives
+# the ReadEndpoint continuously while admitted; route
+# changes trigger the registered `RouteChangeCallback` so
+# the worker can close + reopen at the new format.
+#
+# Reference plugin: `org.evoframework.delivery.alsa` in
+# evo-device-audio (owns the modular `pcm.evo` chain;
+# subscribes to the `audio.options` settings subject for
+# reactive operator-driven reconfiguration).
+
+schema_version = 1
+rack = "audio"
+shelf = "delivery"
+shape = 2
+
+description = """
+Audio data plane terminal delivery stage. The framework
+configures endpoint substrate + negotiated format; the
+plugin opens the configured OS-native ReadEndpoint and
+streams audio bytes through to the local DAC. Plugins
+declare typed format lists; the reconciliation engine
+selects one format per topology. The respondent surface
+exposes operator-facing hardware introspection; the
+audio.options settings subject drives reactive
+reconfiguration. Substrate handles audio byte flow.
+"""
+
+# Request types the framework dispatches against this
+# shelf. Delivery plugins are respondents at the request
+# layer for operator-facing hardware introspection; their
+# primary audio work happens implicitly in a worker driving
+# the ReadEndpoint.
+[[requests]]
+request_type = "delivery.probe_hardware"
+description = """
+Probe the host's audio hardware via libasound (or the
+platform equivalent) and return a snapshot of available
+cards, mixers, supported formats. Operator-facing
+diagnostic; not part of the audio byte path.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "delivery.list_cards"
+description = """
+Return the enumerated list of audio cards present on the
+host. Operator-facing surface for binding a specific card
+through the settings subject; not part of the audio byte
+path.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "delivery.list_mixers"
+description = """
+Return the enumerated list of mixer controls available on
+the active card. Operator-facing surface for binding a
+specific mixer through the settings subject.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "delivery.active_endpoint"
+description = """
+Return the currently-bound endpoint (device path + format)
+the plugin is delivering to. Operator-facing introspection;
+sourced from the plugin's internal state, not the audio
+hardware directly.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+# Acceptance criteria a plugin claiming to satisfy this
+# shape MUST meet.
+[[acceptance]]
+name = "delivery-engages-audio-routing"
+detail = "Plugin consumes `LoadContext::audio_routing` at load time; refuses load loudly when `None`. The framework hands a `Some` only to plugins whose manifest declares `[capabilities.delivery]`, so `None` indicates a manifest / trust misconfiguration that must surface, not be silently swallowed."
+
+[[acceptance]]
+name = "delivery-declares-typed-formats"
+detail = "Plugin declares a non-empty `[capabilities.delivery]` block with `input_kind`, `device`, and a non-empty `audio_formats` array. The reconciliation engine refuses to admit plugins with empty format lists."
+
+[[acceptance]]
+name = "delivery-honours-bit-perfect-claim"
+detail = "Plugins declaring `bit_perfect_capable = true` MUST route audio bytes through a stage that preserves them byte-identically (typically pinned to a direct `hw:` ALSA PCM, no `plug` conversion). Plugins declaring `false` may rely on automatic format conversion (the `plug` substrate, equivalent platform mechanisms) and the topology validator refuses bit-perfect chains through such plugins."
+
+[[acceptance]]
+name = "delivery-reacts-to-route-change"
+detail = "Plugin registers a `RouteChangeCallback` via `AudioRouting::on_route_change` at load. On every framework-fired route change, the plugin closes the old endpoint, calls `read_endpoint()` for the new endpoint, and reopens the OS-native primitive at the new format before resuming byte flow."
+
+[[acceptance]]
+name = "delivery-no-audio-bytes-on-wire"
+detail = "Audio bytes flow exclusively through the OS-native primitive identified by the endpoint; the plugin MUST NOT serialise audio bytes onto any SDK callback, request response, or wire transport. Operator-facing introspection (probe / list / active_endpoint) returns control-plane facts only."
+
+[[acceptance]]
+name = "delivery-subscribes-options-subject"
+detail = "Plugin declares `capabilities.subscribe_subjects = true` and at load time subscribes to the `audio.options.settings` subject published by `org.evoframework.playback.options`. Operator changes (output_device / mixer_type / exclusive_mode / etc.) drive reactive reconfiguration without admission churn."
+
+# NOTE: payload_in / payload_out for the four request types
+# are marked `tbd-review` pending plugin-author review of
+# the reference `org.evoframework.delivery.alsa`'s wire
+# contract. The schema's request_type list, capability
+# surface, and acceptance criteria are stable; the wire
+# payload shapes land in a follow-up authoring step. See
+# evo-catalogue-schemas CHANGELOG.
