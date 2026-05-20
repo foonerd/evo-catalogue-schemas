@@ -35,3 +35,7 @@ plane; enablement only.
 [[shelves]]
 name = "audio"
 current_shape = 1
+
+[[shelves]]
+name = "audio-dsp"
+current_shape = 1

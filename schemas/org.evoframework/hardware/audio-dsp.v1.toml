@@ -1,0 +1,143 @@
+# Schema for the `hardware.audio-dsp` shelf at shape version 1.
+#
+# Hardware-audio-DSP plugins extend the hardware.audio shelf with
+# operator-facing per-DAC DSP control surfaces. The plugin joins
+# three layers to produce the operator-facing control set:
+#
+# 1. The active DAC's catalog `dsp_options[]` (a list of ALSA mixer-
+#    control names the operator can adjust on this hardware).
+# 2. A curated control pool (operator-facing schema for each
+#    common ALSA mixer control: type / value-domain / human label /
+#    recommended default / apply-semantics / description).
+# 3. Live `amixer cget` introspection against the bound card (the
+#    current value + the runtime-narrowed range).
+#
+# The plugin publishes the resolved set as
+# `evo.hardware.audio:dsp_capabilities`; UI plugins render the
+# operator-facing form from the subject state. Operator gestures
+# flow through the verbs declared below; every set persists via
+# `amixer cset` and emits the `hardware.audio.dsp.control_changed`
+# happening so downstream consumers (the playback warden's mixer-
+# rebind reactor for the canonical hardware-mixer controls; future
+# state-projection plugins) react in serialised order.
+#
+# Reference plugin: `org.evoframework.hardware.audio-config` in
+# evo-device-audio (the existing hardware.audio shelf plugin
+# extends to also stock this shelf).
+
+schema_version = 1
+rack = "hardware"
+shelf = "audio-dsp"
+shape = 1
+
+description = """
+Per-DAC DSP control surface joining catalog dsp_options[] + a
+curated ALSA mixer-control pool + live amixer introspection.
+Publishes the dsp_capabilities subject; operator gestures land
+through three verbs and emit a control_changed happening.
+Plugins on this shelf are reactive respondents; no audio data
+plane is owned here, no card hardware is opened beyond amixer.
+"""
+
+# Request types the framework dispatches against this shelf.
+
+[[requests]]
+request_type = "hardware.audio.dsp.list_controls"
+description = """
+Return the resolved DSP control set for the currently-active
+DAC. Each entry carries: ALSA mixer-control name; human label
+(from the curated pool, falling back to the raw name when the
+pool lookup misses); type (enum / integer / boolean / db_scale);
+value domain (enum values + recommended default for enum;
+integer / dB range for the numeric types); current value (from
+runtime amixer cget); apply-semantics (hot_apply or
+requires_restart); bound flag (false when the catalog declares
+the control but amixer does not expose it on the bound card);
+unbound_reason (operator-readable diagnostic when bound = false);
+unbound_pool_entry flag (true when the catalog references a
+control that has no curated pool entry; operator sees the raw
+ALSA name as the label).
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "hardware.audio.dsp.get_control"
+description = """
+Read one DSP control's current value via amixer cget. Surfaces
+the runtime amixer error verbatim if introspection fails; surfaces
+ControlNotInCard when amixer does not expose the requested
+control on the bound card.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "hardware.audio.dsp.set_control"
+description = """
+Set one DSP control's value via amixer cset. Validates the
+supplied value against the curated pool's known_values / range
+AND against amixer's reported range; refuses with ValueOutOfRange
+when out of bounds, ControlNotInPool when the control isn't
+declared in the catalog dsp_options[] or the pool, ControlNotInCard
+when amixer doesn't expose it, AmixerFailed when cset returns
+non-zero, BoundCardUnknown when the hardware-audio active_config
+subject's alsa_card_hint is None / no card matches on the host
+(operator must select_dac first), AdvancedSettingsDisabled when
+the active DAC's advanced_settings_enabled flag is false OR the
+distribution-tier config flag is false. On success, persists the
+new value (amixer state survives reboot when stored via
+alsactl), emits hardware.audio.dsp.control_changed happening,
+republishes dsp_capabilities subject with the new current value.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+# Subjects the plugin announces.
+
+[[subjects]]
+addressing = { scheme = "evo.hardware.audio", value = "dsp_capabilities" }
+subject_type = "hardware_audio_dsp_capabilities"
+description = """
+Resolved DSP control set for the currently-active DAC. State
+refreshes on every successful set_control + on every
+active_config subject change (when the operator selects a
+different DAC). Subscribed UI plugins render the operator-facing
+DSP form from this subject's state.
+"""
+
+# Acceptance criteria.
+
+[[acceptance]]
+name = "three-layer-resolution"
+detail = "list_controls MUST join the active DAC's catalog dsp_options[] + curated control pool + live amixer cget in this order. Catalog declares which controls exist for the DAC; pool provides the operator-facing schema; amixer provides the current value + runtime-narrowed range. Each layer's absence is observable in the published surface (bound = false, unbound_pool_entry = true, etc.); no layer is silently skipped."
+
+[[acceptance]]
+name = "unbound-control-never-silently-disappears"
+detail = "A control declared in catalog dsp_options[] that amixer does not expose on the bound card surfaces in dsp_capabilities with bound = false + operator-readable unbound_reason. A control declared in catalog but absent from the curated pool surfaces with unbound_pool_entry = true + the raw ALSA mixer-control name as the human label. Neither variant disappears from the published set."
+
+[[acceptance]]
+name = "set-validates-against-both-pool-and-amixer"
+detail = "set_control MUST refuse values outside the curated pool's known_values / range AND amixer's reported runtime range. The narrower of the two wins; surface the offending bound + the allowed-values diagnostic in the structured error."
+
+[[acceptance]]
+name = "advanced-settings-gate-enforced"
+detail = "set_control returns AdvancedSettingsDisabled when (a) the active DAC's catalog row carries advanced_settings_enabled = false OR (b) the distribution-tier config flag disables the surface. The two layers are independent: vendor distributions can lock the whole surface off without touching per-DAC flags."
+
+[[acceptance]]
+name = "control-changed-happening-on-write"
+detail = "Every successful set_control emits hardware.audio.dsp.control_changed with the control name, the previous value, the new value, and the apply_semantics (so downstream consumers serialise their rebind work against requires_restart vs hot_apply)."
+
+[[acceptance]]
+name = "structured-failure-variants-enumerated"
+detail = "Every verb's error surface enumerates the variants explicitly: ControlNotInPool / ControlNotInCard / ValueOutOfRange / AmixerFailed / BoundCardUnknown / AdvancedSettingsDisabled. The wire payload carries the variant discriminator + an operator-readable diagnostic. No anonymous string errors."
+
+[[acceptance]]
+name = "subject-refresh-on-active-config-change"
+detail = "When the hardware.audio active_config subject's alsacard_hint changes (operator selected a different DAC), the dsp_capabilities subject MUST be re-resolved against the new card's amixer state within the plugin's reactive-only refresh deadline. Stale dsp_capabilities surfacing controls from the previous card is a contract violation."
+
+# NOTE: payload_in / payload_out are marked `tbd-review` pending
+# plugin-author review. The schema's request_type list, subject
+# contract, happening contract, and acceptance criteria are
+# stable; the wire payload shapes land in a follow-up authoring
+# step. See evo-catalogue-schemas CHANGELOG.
