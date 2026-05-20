@@ -89,6 +89,54 @@ Affects the delivery plugin's pcm chain reconstruction:
 hardware binds the active card's mixer; software inserts
 the platform's software-volume node; none refuses volume
 control.
+
+Mixer-type writes drive an ORCHESTRATED transition (state
+machine + lock; the plugin owns transition ordering across
+delivery + playback subordinates). The mixer-transition
+invariants contract pins the protocol: see acceptance
+criteria `mixer-transition-loudness-continuity`,
+`mixer-transition-no-blast-risk`,
+`mixer-transition-single-authority`,
+`mixer-transition-deterministic-carry-over`,
+`mixer-transition-rollback-safe`, and
+`mixer-transition-operator-truth`. The verb returns success
+only after the full state machine lands or rolls back to the
+prior valid state; concurrent mixer / route / device-bind
+gestures are serialised via a per-plugin transition lock.
+The four lifecycle happenings
+`audio.mixer_transition.{started,applied,rolled_back,failed}`
+make the protocol observable; downstream consumers (UI
+affordances, audit tooling) bind against them.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "options.set_mixer_device"
+description = """
+Set the ALSA mixer-device coordinate for hardware-mixer mode
+(typical shape: `hw:<card>` matching the card name in
+`/etc/asound.conf`). Required-when-`mixer_type = hardware`;
+optional otherwise. The setter validates the device exists
+on the host (sourced from `audio.delivery.list_cards`)
+before persisting. Without this coordinate populated,
+hardware-mixer mode cannot resolve a target and the playback
+warden must refuse or degrade.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "options.set_mixer_control"
+description = """
+Set the ALSA mixer-control name (e.g. `Master`, `PCM`,
+DAC-specific control names visible via `amixer scontrols`).
+Required-when-`mixer_type = hardware`; optional otherwise.
+Paired with `mixer_device`: together they form the
+coordinate the playback warden uses to bind hardware volume
+control. The setter validates the control exists on the
+named device via `amixer -c <device> scontrols` before
+persisting.
 """
 payload_in = "tbd-review"
 payload_out = "tbd-review"
@@ -226,8 +274,36 @@ name = "volume-percent-domain-zero-to-hundred"
 detail = "set_startup_volume + set_max_volume MUST refuse values outside 0..=100 with a structured Permanent error. set_volume_curve MUST refuse values outside {linear, log, natural} with a structured Permanent error."
 
 [[acceptance]]
-name = "mixer-transition-applied-happening"
-detail = "On every mixer_type change the operator-actuating chain (playback.options publishes subject -> delivery.alsa renders pcm.evo -> delivery.alsa emits audio.mixer.transition_applied happening with `from` + `to` + `drop_in_path` fields) MUST fire the audio.mixer.transition_applied happening AFTER the pcm.evo drop-in write succeeds. The happening is the coordination contract downstream consumers (playback wardens' mixer-rebind reactors, UI affordances) use to serialise their rebind work against delivery.alsa's drop-in landing so they do not race the on-disk pipeline definition."
+name = "mixer-transition-loudness-continuity"
+detail = "Switching mixer mode at a constant operator-volume position MUST NOT cause an abrupt jump or drop at the effective output. The orchestrator carries the prior authority's level forward to the new authority via an explicit, reproducible mapping; the new authority is set BEFORE the unmute step. Tolerance values are per-device-profile and hardware-calibrated."
+
+[[acceptance]]
+name = "mixer-transition-no-blast-risk"
+detail = "No transition step may momentarily unmute or open the chain at full scale unintentionally. The orchestrator's command sequence is: pre-mute -> read carried level -> set new authority to carried level -> switch fragment -> restart playback chain -> verify effective level -> unmute. The unmute step is reachable ONLY after a successful set-and-verify; on any earlier failure, the chain remains muted and the rollback path runs."
+
+[[acceptance]]
+name = "mixer-transition-single-authority"
+detail = "At every point in time EXACTLY ONE volume authority is effective: MPD software, ALSA hardware, or none. The orchestrator's state machine enforces no overlap window between authorities — the new authority is established only after the prior is normalised to unity / pass-through (S/W -> H/W) or after the prior is read out and reduced (H/W -> S/W). Concurrent mixer / route / device-bind gestures are serialised via the per-plugin transition lock; the second gesture waits for the first to complete or rollback."
+
+[[acceptance]]
+name = "mixer-transition-deterministic-carry-over"
+detail = "The carried volume value used to seed the new authority MUST be explicit and reproducible. The orchestrator reads the prior authority's effective level via a deterministic source (hardware: amixer cget against the configured device + control; software: MPD's mixer state), applies the operator's volume curve, and writes the resulting value verbatim to the new authority. The carry-over path is captured in the audit log; re-running the same transition with the same inputs produces the same output level."
+
+[[acceptance]]
+name = "mixer-transition-rollback-safe"
+detail = "If any step fails (carried-level read, pre-mute, set new authority, fragment switch, restart, verify, unmute), the orchestrator MUST revert the chain to the prior valid state: prior fragment restored, prior authority's level restored, mute released. The rollback is observable via the `audio.mixer_transition.rolled_back` happening with the operator-readable reason + the phase the failure occurred at. A rollback that itself fails escalates to `audio.mixer_transition.failed` with the chain left in mute as the safe terminal state."
+
+[[acceptance]]
+name = "mixer-transition-operator-truth"
+detail = "After the transition lands, the UI's volume reflects the EFFECTIVE output path (the new authority's value), not the operator's pre-transition slider position. The orchestrator's `audio.mixer_transition.applied` happening's payload includes the post-transition effective level so subscribers can update their cached display without re-querying."
+
+[[acceptance]]
+name = "mixer-transition-lifecycle-happenings"
+detail = "Every transition fires the lifecycle happenings in the operator-observable order: `audio.mixer_transition.started` on lock acquisition + state-machine entry; `audio.mixer_transition.applied` on successful completion of all eight steps; `audio.mixer_transition.rolled_back` on failure of any step that successfully reverts to the prior valid state; `audio.mixer_transition.failed` on failure that cannot be reverted (terminal state, chain left muted). The four happenings are MUTUALLY EXCLUSIVE per transition: `applied` xor `rolled_back` xor `failed` — never two of them for the same `started` happening."
+
+[[acceptance]]
+name = "mixer-transition-hardware-mode-requires-device-and-control"
+detail = "Setting `mixer_type = hardware` without populating `mixer_device` + `mixer_control` MUST refuse with a structured Permanent error naming both required fields. Degrade-to-software fallback IS permitted only when the operator explicitly requested it via a separate gesture; silent automatic degrade on a missing coordinate is a contract violation (operator picked hardware for a reason; the safe response is to surface the gap, not paper over it)."
 
 # NOTE: payload_in / payload_out for the eight request
 # types are marked `tbd-review` pending plugin-author
