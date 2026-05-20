@@ -225,6 +225,10 @@ detail = "set_startup_volume MUST refuse a value above max_volume_percent. set_m
 name = "volume-percent-domain-zero-to-hundred"
 detail = "set_startup_volume + set_max_volume MUST refuse values outside 0..=100 with a structured Permanent error. set_volume_curve MUST refuse values outside {linear, log, natural} with a structured Permanent error."
 
+[[acceptance]]
+name = "mixer-transition-applied-happening"
+detail = "On every mixer_type change the operator-actuating chain (playback.options publishes subject -> delivery.alsa renders pcm.evo -> delivery.alsa emits audio.mixer.transition_applied happening with `from` + `to` + `drop_in_path` fields) MUST fire the audio.mixer.transition_applied happening AFTER the pcm.evo drop-in write succeeds. The happening is the coordination contract downstream consumers (playback wardens' mixer-rebind reactors, UI affordances) use to serialise their rebind work against delivery.alsa's drop-in landing so they do not race the on-disk pipeline definition."
+
 # NOTE: payload_in / payload_out for the eight request
 # types are marked `tbd-review` pending plugin-author
 # review of the reference `org.evoframework.playback.options`'s
