@@ -98,6 +98,41 @@ hardware directly.
 payload_in = "tbd-review"
 payload_out = "tbd-review"
 
+[[requests]]
+request_type = "delivery.list_outputs"
+description = """
+Return the resolved ALSA outputs list captured at plugin
+load: every (card, subdevice) pair `aplay -l` reported,
+joined against the plugin's embedded card-name catalog so
+each row carries an operator-friendly label, a derived
+output class (I2S / HDMI / Analog / SPDIF / USB / Bluetooth
+/ Unknown), and the default ALSA mixer control. Operator-
+facing surface for the UI's output-device picker. The same
+data is also published on the `audio_delivery_outputs`
+subject; this verb returns it as a one-shot read.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[subjects]]
+addressing = { scheme = "evo.audio.delivery", value = "outputs" }
+subject_type = "audio_delivery_outputs"
+description = """
+Resolved ALSA outputs list captured at plugin load. Each
+row carries the runtime (card, subdevice) identity, the
+raw ALSA card name as the kernel reported it, the
+canonical `hw:N,M` identifier, an operator-friendly label
+resolved against the plugin's embedded card catalog (with
+fallback to the raw card name when the catalog has no
+matching row), a derived output class (I2S / HDMI / Analog
+/ SPDIF / USB / Bluetooth / Unknown), the default ALSA
+mixer control name (when the catalog declares one), and
+flags for catalog provenance and per-subdevice visibility.
+State refreshes on every plugin load. Hot-plug re-
+publish and operator-gestured refresh land in a follow-on
+chunk; v2 ships the boot-state snapshot.
+"""
+
 # Acceptance criteria a plugin claiming to satisfy this
 # shape MUST meet.
 [[acceptance]]
