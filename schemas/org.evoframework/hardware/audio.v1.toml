@@ -52,11 +52,17 @@ Return the catalogue of supported audio-hardware entries for
 the host's resolved board profile (e.g. Raspberry PI). Each
 entry carries the catalogue id, display name, dtoverlay
 token, ALSA card short id, mixer-control hint, optional ID
-EEPROM string list, optional I2C address hint, and the
-per-row needs-reboot flag. Empty catalogue when the board
-profile is not represented in the bundled catalogue (e.g.
-generic x86 hosts); operators understand the gesture is
-inapplicable on this board class.
+EEPROM string list, optional I2C address hint, the per-row
+needs-reboot flag, and the per-row `interface` classification
+declaring the bus topology by which the DAC is reached
+(`i2s` / `usb` / `spdif` / `hdmi` / `analog` / `bluetooth`).
+The `interface` is the authoritative source consumers
+(audio.delivery, UI output-class chips) use to classify the
+output; it MUST be declared per row and MUST NOT default —
+silent inference at downstream join sites is forbidden.
+Empty catalogue when the board profile is not represented in
+the bundled catalogue (e.g. generic x86 hosts); operators
+understand the gesture is inapplicable on this board class.
 """
 payload_in = "tbd-review"
 payload_out = "tbd-review"
@@ -94,8 +100,13 @@ description = """
 Return the host's currently-applied configuration: the
 dtoverlay token in the managed block (empty when no managed
 block is present), the resolved catalogue id + ALSA card
-hint + mixer hint via catalogue lookup, and the boot-config
-path the read happened from. Operator-facing read; idempotent.
+hint + mixer hint + `interface` via catalogue lookup, and
+the boot-config path the read happened from. The `interface`
+field carries the declared bus topology of the resolved DAC
+(`i2s` / `usb` / `spdif` / `hdmi` / `analog` / `bluetooth`)
+verbatim from the catalogue row; absent when no managed
+block is present (no resolved DAC). Operator-facing read;
+idempotent.
 """
 payload_in = "tbd-review"
 payload_out = "tbd-review"
@@ -177,6 +188,10 @@ detail = "A managed block left behind by prior tooling (e.g. Volumio's banner) i
 name = "verify-install-probes-runtime-preconditions"
 detail = "verify_install returns a structured verdict over four independent probes (board profile resolved, catalogue non-empty, privileged-write grant present, modder staging directory writable); each probe reports ok / failed with an operator-readable diagnostic; the verb is read-only and idempotent."
 
+[[acceptance]]
+name = "interface-declared-per-dac"
+detail = "Every catalogue DAC row declares an `interface` field with value ∈ {i2s, usb, spdif, hdmi, analog, bluetooth}; the field has no default and the loader rejects rows omitting it. The active_config subject + current_config response carry the resolved DAC's declared interface verbatim. Downstream consumers (audio.delivery output-class derivation, UI Destination chips) classify outputs from this declared value; silent inference from card-name string heuristics at the join site is forbidden."
+
 # Subjects the plugin announces. Consumers (audio.delivery,
 # audio.playback wardens, UI plugins) resolve the addressings
 # below against the framework's subject querier and subscribe
@@ -197,11 +212,18 @@ addressing = { scheme = "evo.hardware.audio", value = "active_config" }
 subject_type = "hardware_audio_active_config"
 description = """
 Currently-applied configuration: dtoverlay token in the
-managed block, resolved catalogue id + ALSA card hint +
-mixer hint, boot-config path the read happened from. State
-refreshes on every successful select_dac / clear_dac.
-Subscribed audio plugins (delivery, playback) read this to
-bind their pieces without re-probing the host.
+managed block, resolved catalogue id + display name + ALSA
+card hint + mixer hint + `interface`, boot-config path the
+read happened from. The `interface` field declares the
+resolved DAC's bus topology (`i2s` / `usb` / `spdif` /
+`hdmi` / `analog` / `bluetooth`) verbatim from the catalogue
+row and is the authoritative downstream classification —
+delivery.alsa's output-class derivation reads it directly,
+never re-infers from card-name string heuristics. Absent when
+no managed block is present (no resolved DAC). State refreshes
+on every successful select_dac / clear_dac. Subscribed audio
+plugins (delivery, playback) read this to bind their pieces
+without re-probing the host.
 """
 
 [[subjects]]
