@@ -1,0 +1,25 @@
+# Rack-level metadata for the `system` rack.
+#
+# The system rack hosts brand-neutral framework-tier shelves
+# governing host-level system management: power (reboot /
+# power-off), and over time (time, storage, updates) as those
+# plugins land. Reference plugin for the power shelf is
+# `org.evoframework.system.power` in evo-device-audio (systemctl
+# back-end via D-Bus on systemd hosts; vendor distributions ship
+# replacements under their namespace for hardware-watchdog
+# routing or alternate init systems).
+
+rack = "system"
+namespace = "org.evoframework"
+
+description = """
+Brand-neutral host-system rack hosting reference shelves for
+device-level management gestures. Plugins implement the contract
+over a specific back-end (systemd, OpenRC, hardware watchdog,
+etc.); the framework admits one plugin per shelf per device.
+"""
+
+# Shelves under this rack and their current shape version.
+[[shelves]]
+name = "power"
+current_shape = 1

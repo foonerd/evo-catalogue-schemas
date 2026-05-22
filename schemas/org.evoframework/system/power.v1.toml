@@ -1,0 +1,91 @@
+# Schema for the `system.power` shelf at shape version 1.
+#
+# Power-management plugins handle operator-gestured host reboot
+# and power-off. Both verbs are step-up gated at the framework
+# dispatcher's per-verb capability gate (scope `system_admin`);
+# the principal must hold the write scope AND an active step-up
+# auth session before the verb reaches the plugin. The plugin
+# never re-checks the principal — the framework dispatcher is
+# the authoritative gate, and re-checking inside the plugin
+# would split the policy across two layers.
+#
+# Cardinality is one plugin per device. Reference plugin:
+# `org.evoframework.system.power` in evo-device-audio (systemctl
+# back-end via D-Bus on systemd hosts). Vendor distributions
+# that need different shutdown semantics (hardware watchdog,
+# alternate init system, locked-down host) ship a vendor-
+# namespace replacement; the verb names + capability scope are
+# stable across replacements, the implementation underneath is
+# not.
+
+schema_version = 1
+rack = "system"
+shelf = "power"
+shape = 1
+
+description = """
+Host power-management shelf. Plugin implements operator-gestured
+reboot and power-off, each step_up:system_admin gated. The plugin
+exits to the framework as soon as the underlying shutdown verb
+returns; the host's init system performs the actual transition
+asynchronously, so by the time the operator's wire response
+arrives the framework itself is likely shutting down.
+"""
+
+# Request types the framework dispatches against this shelf.
+# Each verb gates at the framework's per-verb capability gate;
+# scope declarations live in the plugin's manifest at
+# `[capabilities.respondent.verb_capabilities]`.
+
+[[requests]]
+request_type = "reboot_device"
+description = """
+Request an orderly host reboot. The plugin invokes the host's
+init-system reboot affordance (systemctl reboot on systemd hosts,
+alternate paths on vendor-replaced plugins). Returns to the
+caller after the reboot request is issued; the host's init system
+performs the actual shutdown asynchronously. The wire response
+may not reach the caller before the connection drops as the
+framework itself shuts down.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "power_off_device"
+description = """
+Request an orderly host power-off. Same shape as reboot_device
+but routes the host's power-off affordance. The host does not
+come back up; the operator (or a hardware wake-on-lan / scheduled
+boot) is responsible for restoring service.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+# Acceptance criteria a plugin claiming to satisfy this shape
+# MUST meet. The framework does not enforce these at admission
+# (no runtime assertion harness yet); they document what a
+# future shape-conformance test would check.
+
+[[acceptance]]
+name = "verb-gates-declared-in-manifest"
+detail = "Both verbs declare step_up:system_admin in the plugin's manifest at [capabilities.respondent.verb_capabilities]; a manifest without the declarations admits but its verbs default to anonymous-OK, which violates the contract this shelf documents."
+
+[[acceptance]]
+name = "no-re-check-in-handle-request"
+detail = "The plugin's handle_request body does NOT re-check the principal against the request's principal_scope / has_step_up fields; the framework dispatcher's check is the authoritative gate. A plugin that re-implements its own gate splits the policy across two layers."
+
+[[acceptance]]
+name = "narrow-privilege-grant"
+detail = "Privileged invocations (e.g. sudo systemctl reboot) route through an exact-match sudoers Cmnd_Alias (one binary + one argv element each); no wildcards, no broad grant. The operator audit log keeps a full record of any command outside the alias."
+
+[[acceptance]]
+name = "structured-failure-modes"
+detail = "Every failure surfaces as a structured PluginError::Transient or PluginError::Permanent carrying the underlying stderr; no panics, no silent fallback. The framework dispatcher does not interpret the error class beyond propagating it to the caller."
+
+# Subjects the plugin announces. The power shelf has no subjects
+# in this shape — the verbs are fire-and-shutdown; there is no
+# operator-observable state the plugin maintains between
+# invocations. Future amendments may add subjects (e.g. a
+# `last_reboot_at` published subject for fleet operators) when
+# the use case lands.
