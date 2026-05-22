@@ -337,6 +337,68 @@ payload_in = "tbd-review"
 payload_out = "tbd-review"
 
 [[requests]]
+request_type = "options.list_eq_presets"
+description = """
+Return the named EQ preset library. Empty array on a fresh
+device; library order is insertion order (save appends; recall
+does not rearrange). Each entry carries the preset name + the
+same 10-band shape as `eq_bands`. Operator UI renders the
+recall selector from this and uses it as the export source.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "options.save_eq_preset"
+description = """
+Save a named EQ preset (create or overwrite by name). Payload
+shape: `{ v: 1, name: String (1..=64 bytes), bands: [EqBand;
+10] }` where each EqBand matches the schema-pinned domain
+(freq_hz 20..=20000, gain_db -15.0..=15.0, q 0.1..=30.0). The
+setter refuses with a structured Permanent error naming the
+offending field when: name is empty, name exceeds 64 bytes,
+bands.len() != 10, any band field out-of-range, or the library
+cap (32 entries) is reached on a create. Persists; updates the
+subject (emits `audio.options.changed` with field
+`"eq_presets"`).
+
+Takes the bands explicitly (not "snapshot the active config")
+so the one verb serves both "save current as" (UI passes the
+live bands) and "import" (UI passes bands from a file). The
+preset does NOT carry `eq_engaged` — engagement is session
+state, not part of a saved curve.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "options.recall_eq_preset"
+description = """
+Apply a named preset's 10 bands to the active `eq_bands`
+atomically. Payload shape: `{ v: 1, name: String }`. Refuses
+with a structured Permanent error naming the offending preset
+when the name is not in the library. Persists; emits a SINGLE
+`audio.options.changed` happening with field `"eq_bands"` —
+not 10 — so subject-stream consumers observe one recall
+gesture, not ten band updates. `eq_engaged` is unchanged (the
+operator-facing A/B flag is session state).
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "options.delete_eq_preset"
+description = """
+Remove a named preset from the library. Payload shape:
+`{ v: 1, name: String }`. Refuses with a structured Permanent
+error naming the offending preset when the name is not in the
+library. Persists; updates the subject (emits
+`audio.options.changed` with field `"eq_presets"`).
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
 request_type = "options.restore_last_known_good"
 description = """
 Restore the most-recently-known-working settings snapshot
@@ -462,6 +524,14 @@ detail = "The parametric EQ carries exactly 10 bands. Each band carries `{ freq_
 [[acceptance]]
 name = "eq-flat-defaults"
 detail = "set_eq_engaged defaults `false` (operator opts in). The 10 bands default to flat: `{ freq_hz: 1000, gain_db: 0.0, q: 1.0 }` for all 10 indices. The audiophile-grade `do no harm` posture — an operator engaging EQ without configuring bands hears no change."
+
+[[acceptance]]
+name = "eq-preset-library-bounds"
+detail = "The named EQ preset library is bounded: at most 32 entries (`save_eq_preset` refuses on overflow with a structured Permanent error naming the cap; operator deletes a preset before saving another); each name is 1..=64 bytes (refuses empty + over-long with structured Permanent error naming the cap). Every saved preset carries exactly 10 bands and validates each band against the schema-pinned domain (freq_hz 20..=20000, gain_db -15.0..=15.0, q 0.1..=30.0). Recall + delete refuse on unknown names with a structured Permanent error naming the offending name and pointing the operator at `list_eq_presets` to enumerate. The preset does NOT carry `eq_engaged` — engagement is session state."
+
+[[acceptance]]
+name = "eq-preset-recall-emits-single-subject-update"
+detail = "`recall_eq_preset` replaces all 10 active eq_bands atomically and emits a SINGLE `audio.options.changed` happening with field `eq_bands` — not 10. This is the recall verb's architectural reason for existing alongside the per-band setter: subject-stream consumers observe one recall gesture, not ten band updates. The composition.alsa subscriber (or any future subject consumer) recomputes biquad coefficients once per recall, not once per band."
 
 # NOTE: payload_in / payload_out for the eight request
 # types are marked `tbd-review` pending plugin-author
