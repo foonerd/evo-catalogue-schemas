@@ -1,7 +1,9 @@
 # Schema for the `audio.options` shelf at shape version 2.
 #
 # Shape 2 extends shape 1 with three operator-facing volume-
-# safety + perception controls:
+# safety + perception controls plus the operator-facing
+# bit-perfect (exclusive) device mode + the MPD-policy
+# perception controls (crossfade + gapless):
 #
 # * `options.set_startup_volume` — initial volume the playback
 #   warden restores on plugin load / steward restart, protecting
@@ -14,9 +16,22 @@
 # * `options.set_volume_curve` — perceived-loudness mapping
 #   (`linear` / `log` / `natural`) the playback warden applies
 #   between the operator's slider and the actual gain.
+# * `options.set_exclusive_mode` — bit-perfect (hog-mode)
+#   toggle. When `true`, the delivery plugin renders the
+#   `pcm.evo` chain with NO automatic format conversion node
+#   (no `plug`) and pins directly to the card terminus, so the
+#   source format reaches the DAC byte-identical.
+# * `options.set_crossfade_seconds` + `options.set_gapless` —
+#   MPD-policy perception controls. Crossfade selects a
+#   between-track fade duration (0 = off, 1..=30 seconds);
+#   gapless enables single-mode playback so consecutive tracks
+#   on the queue play without a silent gap. Same class as
+#   `volume_normalization`: persisted in settings, fanned via
+#   subject, applied by the playback warden at the MPD protocol
+#   layer.
 #
 # All shape-1 verbs remain present; consumers querying for
-# shape >= 1 keep working. The persisted state file gains three
+# shape >= 1 keep working. The persisted state file gains the
 # new fields with safe defaults; absence of the fields in an
 # existing state file is treated as the default values
 # (no migration step required).
@@ -64,8 +79,11 @@ no audio data plane.
 request_type = "options.get_settings"
 description = """
 Return the current settings projection: resampling /
-mixer_type / dop / output_device / volume_normalization.
-Operator-facing read verb; idempotent.
+mixer_type / mixer_device / mixer_control / dop /
+output_device / volume_normalization / startup_volume_percent /
+max_volume_percent / volume_curve / exclusive_mode /
+crossfade_seconds / gapless. Operator-facing read verb;
+idempotent.
 """
 payload_in = "tbd-review"
 payload_out = "tbd-review"
@@ -218,6 +236,107 @@ payload_in = "tbd-review"
 payload_out = "tbd-review"
 
 [[requests]]
+request_type = "options.set_exclusive_mode"
+description = """
+Toggle bit-perfect (hog) device mode. When `true`, the
+delivery plugin re-renders the `pcm.evo` chain to point
+directly at the card's `hw:` terminus with NO front-end
+`plug` node, so the source's bytes reach the DAC without
+automatic format conversion — the bit-perfect path. When
+`false`, the chain reverts to the `plug`-fronted path that
+bridges format mismatches via the kernel's automatic
+conversion (operator-friendly default; the chain accepts
+any format the kernel can resample). Persists; updates the
+subject; the delivery plugin subscriber re-renders the
+asound.conf drop-in within the subject-update window. The
+delivery-shelf contract (acceptance row
+`exclusive-mode-delivery-shelf-contract`) pins the
+plugin's obligation to honour the operator's choice or
+signal the gap explicitly; the setter itself accepts the
+gesture without static-capability gating, because the
+plugin's static-manifest `bit_perfect_capable` flag is an
+"always" guarantee whereas this setting is an
+operator-toggleable runtime branch.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "options.set_crossfade_seconds"
+description = """
+Set the between-track crossfade duration in seconds.
+Domain: 0..=30 unsigned. 0 disables crossfade (the
+audiophile default — no in-chain fade between tracks).
+Non-zero values request MPD's protocol-level crossfade for
+the named seconds count. The setter refuses values above
+30 with a structured Permanent error (operator can lift
+the ceiling by amending this schema, but the limit catches
+slider-typo + UI-bug excursions). Persists; updates the
+subject; the playback warden applies the new crossfade via
+MPD's `crossfade <seconds>` protocol verb on the next
+subject-update window.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "options.set_gapless"
+description = """
+Enable / disable gapless playback. When `true`, the
+playback warden engages MPD's single-mode-off + zero-pause
+queue traversal, so consecutive tracks on the queue play
+without a silent gap between them (essential for live
+albums, classical works, electronic mixes, anything
+authored with continuity between tracks). When `false`,
+the warden falls through to MPD's default single-track
+behaviour (a brief gap between adjacent tracks). Persists;
+updates the subject; the playback warden re-applies the
+mode at the MPD protocol layer on the next subject-update
+window.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "options.set_eq_engaged"
+description = """
+Toggle the parametric-EQ processing on/off without changing
+the composition mode. When `true`, the composition plugin
+applies the operator-configured 10-band EQ to the PCM byte
+stream; when `false`, the bytes pump through unchanged. The
+operator uses this to A/B the EQ effect (engage / disengage)
+without leaving the EQ composition mode (the topology stays
+put). Persists; updates the subject; composition.alsa
+re-renders its byte-flow path on the next subject-update
+window.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "options.set_eq_band"
+description = """
+Configure one band of the 10-band parametric EQ. Payload
+shape: `{ v: 1, index: u32 (0..=9), freq_hz: u32 (20..=20000),
+gain_db: f32 (-15.0..=15.0), q: f32 (0.1..=30.0) }`. The
+setter refuses any out-of-range value with a structured
+Permanent error naming the offending field + accepted range.
+Persists; updates the subject; the composition plugin
+recomputes the band's biquad coefficients from (freq_hz,
+gain_db, Q, sample_rate) using the RBJ Audio EQ Cookbook
+peaking-EQ formulas and applies the cascaded filters on the
+next byte-pump cycle.
+
+The band index addresses one of the 10 bands; the operator
+configures them independently. Defaults are flat (all bands
+at 1 kHz / 0 dB / Q=1.0) so an operator engaging EQ without
+configuring bands hears no change — the audiophile-grade
+"do no harm" default.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
 request_type = "options.restore_last_known_good"
 description = """
 Restore the most-recently-known-working settings snapshot
@@ -237,8 +356,15 @@ Reset the settings to the documented defaults
 delivery`, `volume_normalization = disabled`,
 `startup_volume_percent = 30`,
 `max_volume_percent = 100`,
-`volume_curve = linear`). Persists; updates the subject;
-subscribers reconfigure.
+`volume_curve = linear`,
+`exclusive_mode = false`,
+`crossfade_seconds = 0`,
+`gapless = true`). Persists; updates the subject;
+subscribers reconfigure. Gapless defaults to `true`
+because the audiophile-grade reference treats gap-free
+playback as the canonical behaviour, not an opt-in extra;
+operators with album-as-track-list preferences flip it
+off.
 """
 payload_in = "tbd-review"
 payload_out = "tbd-review"
@@ -312,6 +438,30 @@ detail = "The orchestrator coordinates the safety envelope's mute / unmute steps
 [[acceptance]]
 name = "mixer-transition-lifecycle-emitter-is-orchestrator"
 detail = "The four `audio.mixer_transition.*` lifecycle happenings (started / applied / rolled_back / failed) are emitted by the orchestrator (the playback.options-shape plugin) ONLY. Subordinate plugins (audio.delivery, audio.playback) MUST NOT emit these happenings themselves; downstream observers (UI affordances, audit tooling) subscribe to the orchestrator-emitted stream as the single canonical source of mixer-transition lifecycle state. Subordinates communicate their step-completion via the envelope_observed subject (above), not via lifecycle happenings."
+
+[[acceptance]]
+name = "exclusive-mode-bit-perfect-render-path"
+detail = "When `exclusive_mode = true`, the delivery plugin renders the `pcm.evo` front-end with NO `type plug` node — it pins directly at the card's `hw:` terminus so source bytes reach the DAC without automatic format conversion. When `exclusive_mode = false`, the renderer falls through to the `plug`-fronted path (current default). The rendered drop-in is byte-identical for identical inputs (the existing determinism guarantee on `render_drop_in` extends to the new field). Tested via two render-shape assertions: with-flag-on contains no `type plug` line targeting `pcm.evo` directly, and with-flag-off contains the existing `type plug` line. The single canonical runtime path: there is one `render_drop_in` function; the flag selects a branch within it, never a parallel renderer."
+
+[[acceptance]]
+name = "exclusive-mode-delivery-shelf-contract"
+detail = "The bit-perfect rendering capability is an `audio.delivery` shelf contract: any plugin admitted to the shelf MUST honour the operator's `exclusive_mode = true` setting by rendering a chain whose front-end has no in-chain digital-conversion node (no `plug`, no `softvol`, no rate conversion). The reference plugin `org.evoframework.delivery.alsa` satisfies this by branching `render_drop_in` on the field. Plugins on the shelf that cannot render the bit-perfect path MUST signal the gap via an operator-readable WARN happening on subject update — they MUST NOT silently fall through to the non-bit-perfect chain. The static manifest field `capabilities.delivery.bit_perfect_capable` is reserved for plugins that ALWAYS render bit-perfect (the SDK enforces `bit_perfect_capable => exclusive_mode` at manifest parse); a runtime-toggleable plugin keeps both false in its manifest and honours the operator setting through the renderer branch."
+
+[[acceptance]]
+name = "crossfade-seconds-domain-zero-to-thirty"
+detail = "set_crossfade_seconds MUST refuse values outside 0..=30 with a structured Permanent error naming the offending value + the accepted range. `0` is a valid value and disables crossfade entirely (the audiophile default). The playback warden translates the persisted seconds count into MPD's `crossfade <n>` protocol verb on the next subject-update window."
+
+[[acceptance]]
+name = "gapless-bool-domain"
+detail = "set_gapless accepts a bool payload only; any other shape is a structured Permanent error. The playback warden engages MPD's single-mode-off + queue-traversal with zero-pause when `true`, and the default single-track behaviour when `false`. The setting is orthogonal to `crossfade_seconds` (operator may combine them in any pairing; the warden applies both verbs)."
+
+[[acceptance]]
+name = "eq-band-count-and-domain"
+detail = "The parametric EQ carries exactly 10 bands. Each band carries `{ freq_hz: u32 (20..=20000), gain_db: f32 (-15.0..=15.0), q: f32 (0.1..=30.0) }`. set_eq_band refuses any band index outside 0..=9 with a structured Permanent error naming the offending index; refuses any out-of-range field value with a structured Permanent error naming the field + accepted range. The 10-band count is the schema-pinned canonical surface; plugins on the composition shelf claiming `eq_only` honour exactly these 10 bands."
+
+[[acceptance]]
+name = "eq-flat-defaults"
+detail = "set_eq_engaged defaults `false` (operator opts in). The 10 bands default to flat: `{ freq_hz: 1000, gain_db: 0.0, q: 1.0 }` for all 10 indices. The audiophile-grade `do no harm` posture — an operator engaging EQ without configuring bands hears no change."
 
 # NOTE: payload_in / payload_out for the eight request
 # types are marked `tbd-review` pending plugin-author

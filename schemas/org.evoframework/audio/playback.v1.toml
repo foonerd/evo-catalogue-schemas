@@ -41,6 +41,7 @@ course_correct_verbs = [
     "previous",
     "seek",
     "set_volume",
+    "emit_test_tone",
 ]
 
 # Per-verb payload contracts. Payloads travel as opaque
@@ -104,6 +105,39 @@ outside the range are clamped by the warden.
 """
 payload_out = "empty"
 
+[[verbs]]
+name = "emit_test_tone"
+payload_in = """
+Operator-facing wiring diagnostic. The warden synthesises a
+sine wave at the requested frequency and emits it through the
+full playback chain (composition + delivery + DAC) for the
+requested duration, then returns silence. The channel-routing
+arg selects left-only / right-only / both-channels emission so
+the operator can confirm channel mapping at the DAC physical
+output (left-only test tone with audible right output =
+miswired channels). Payload is a UTF-8 JSON object with the
+following fields (all optional, defaults documented):
+
+  {
+    "v": 1,
+    "freq_hz": 1000,
+    "duration_ms": 1500,
+    "channel": "both"
+  }
+
+`freq_hz` accepts 20..=20000 (audible band); values outside
+the range refuse with a structured Permanent error.
+`duration_ms` accepts 100..=10000; the upper bound catches
+slider-typo + UI-bug excursions, the lower bound ensures the
+tone is operator-perceptible. `channel` is one of {`left`,
+`right`, `both`}; any other string refuses. The verb returns
+once the synthesis is enqueued; the warden continues to honour
+operator gestures (stop / next / etc.) during emission, so a
+mistakenly-started test tone is operator-interruptible without
+waiting for `duration_ms` to elapse.
+"""
+payload_out = "empty"
+
 # Acceptance criteria a plugin claiming to satisfy this
 # shape MUST meet. The framework does not enforce these at
 # admission (no runtime assertion harness yet); they
@@ -128,6 +162,18 @@ detail = "Payloads are versioned by their encoding contract per verb (above). A 
 [[acceptance]]
 name = "warden-volume-clamping"
 detail = "set_volume payloads outside the 0..=100 range are clamped, not rejected. Matches the operator-experience principle that a slider value at the extreme end behaves as the extreme rather than failing the dispatch."
+
+[[acceptance]]
+name = "emit-test-tone-exercises-full-playback-chain"
+detail = "The `emit_test_tone` verb synthesises a sine wave and routes it through the SAME composition + delivery + DAC chain that real audio playback uses (not a side-channel `speaker-test` invocation). This is the operator-facing wiring diagnostic: if the test tone is silent the chain itself is broken, not just one playable file. The warden writes the synthesised PCM to a temp file and dispatches an internal LoadAndPlay command so the full pcm.evo → composition → delivery topology is exercised."
+
+[[acceptance]]
+name = "emit-test-tone-channel-routing-domain"
+detail = "The `channel` arg accepts {`left`, `right`, `both`} only. Any other string refuses with a structured Permanent error naming the offending value + the accepted domain. The warden synthesises a stereo PCM where left-only fills only the L channel with zero in R, right-only the reverse, both-channels carries the sine in both channels with equal amplitude. Operators use the L/R split to verify channel mapping at the DAC physical output."
+
+[[acceptance]]
+name = "emit-test-tone-frequency-and-duration-bounds"
+detail = "`freq_hz` must lie in 20..=20000 (audible band); refusal carries the offending value + the accepted band. `duration_ms` must lie in 100..=10000; refusal names the offending value + the accepted range. The bounds protect against operator typos (e.g. 100000 Hz inaudible / 100000 ms ten-second-tone) while keeping the operator-perceptible range fully covered."
 
 [[acceptance]]
 name = "stream-format-published-on-load-and-every-format-change"

@@ -99,6 +99,18 @@ detail = "Calls to `composition_endpoints()` returning `AudioRoutingError::Endpo
 name = "composition-no-audio-bytes-on-wire"
 detail = "Audio bytes flow exclusively through the OS-native primitive identified by the endpoints; the plugin MUST NOT serialise audio bytes onto any SDK callback, request response, or wire transport. Metering / spectrum / progress streams (derived from the audio data, not the data itself) are the only allowed control-plane projections."
 
+[[acceptance]]
+name = "eq-only-parametric-band-shape"
+detail = "Plugins declaring the `eq_only` mode token MUST honour a 10-band parametric EQ control surface, addressed through the `audio.options.settings` subject. Each band carries `{ freq_hz: u32 (20..=20000), gain_db: f32 (-15.0..=15.0), q: f32 (0.1..=30.0) }`. The plugin subscribes to the settings subject, computes biquad-filter coefficients from each band's parameters using the RBJ Audio EQ Cookbook peaking-EQ formulas, and applies the cascaded filters per channel to the PCM byte stream. The plugin keeps `eq_only` decoupled from `preserves_bit_perfect` (EQ engagement implies bytes change; the topology validator refuses bit-perfect chains routed through an active EQ stage)."
+
+[[acceptance]]
+name = "eq-only-engaged-flag-gates-processing"
+detail = "Within `eq_only` mode, the plugin honours an `eq_engaged: bool` flag from `audio.options.settings`. When `eq_engaged = false`, the byte stream pumps through unchanged (the operator selected the EQ mode but turned off processing); when `eq_engaged = true`, the configured bands apply. This split enables the operator to A/B the EQ effect without leaving the EQ mode (the topology stays put; only the byte transformation toggles)."
+
+[[acceptance]]
+name = "eq-only-sample-format-coverage"
+detail = "Plugins claiming the `eq_only` mode MUST cover the negotiated format's full sample format set or refuse the mode-select gesture with a structured Permanent error naming the offending format. The reference plugin covers s16le and f32le (the two most common Linux audio formats); other formats refuse pending plugin-author extension. The refusal is operator-visible at the mode-select gesture, not silent at byte time."
+
 # NOTE: payload_in / payload_out for composition.select_mode
 # are marked `tbd-review` pending plugin-author review of the
 # reference `org.evoframework.composition.alsa`'s wire
