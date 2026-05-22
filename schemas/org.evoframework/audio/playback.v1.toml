@@ -128,3 +128,37 @@ detail = "Payloads are versioned by their encoding contract per verb (above). A 
 [[acceptance]]
 name = "warden-volume-clamping"
 detail = "set_volume payloads outside the 0..=100 range are clamped, not rejected. Matches the operator-experience principle that a slider value at the extreme end behaves as the extreme rather than failing the dispatch."
+
+[[acceptance]]
+name = "stream-format-published-on-load-and-every-format-change"
+detail = "The warden announces the `stream_format` subject (addressing `{ scheme = 'evo.audio.playback', value = 'stream_format' }`, subject_type `audio_playback_stream_format`) on load and updates it on every audio-format change (track transition with different rate, gapless transition into a different-rate track, MPD reopen at a different format, source-pcm vs source-dsd switch). The state payload carries `{ v, effective, source }` where `effective` is the AudioFormat reaching the DAC after resampling + DoP wrapping and `source` is the AudioFormat MPD decoded from the file (null when source isn't separately knowable; subscribers treat null as 'source = effective'). AudioFormat round-trips the evo-plugin-sdk `AudioFormat` serde representation — PCM `{ kind, codec, rate_hz, channels }`, DSD `{ kind, rate, transport, channels }`, EncodedPassthrough `{ kind, codec, rate_hz, channels }`. The subject is the single source of truth for the live stream format; out-of-band format channels (parallel wire ops, sidecar events, format fields crammed into `track`) are forbidden."
+
+# Subjects the warden announces. Consumers (operator UI's
+# format display, future loggers / auditors) resolve the
+# addressing below against the framework's subject querier
+# and subscribe via SubjectStateSubscriber.
+
+[[subjects]]
+addressing = { scheme = "evo.audio.playback", value = "stream_format" }
+subject_type = "audio_playback_stream_format"
+description = """
+Live audio-stream format the warden is feeding into the
+write endpoint. Updates whenever the audio format reaching
+the DAC changes (track transition with different rate,
+gapless transition into a different-rate track, MPD reopen
+at a different format, source-pcm vs source-dsd switch).
+Carries both the effective format (post-resampling, post-
+DoP-wrapping; what reaches the DAC) and the source format
+(what MPD decoded from the file; null when the source isn't
+separately knowable). DSD streams carry the transport
+discriminant (DoP vs NativeUsb) so the operator UI can show
+whether DoP wrapping is active.
+
+Payload shape: `{ v: 1, effective: AudioFormat, source:
+AudioFormat | null }` where AudioFormat round-trips the
+evo-plugin-sdk `AudioFormat` serde representation.
+
+The subject is the only sanctioned surface for live stream
+format; consumers MUST subscribe rather than polling a verb
+or recovering from happenings.
+"""
