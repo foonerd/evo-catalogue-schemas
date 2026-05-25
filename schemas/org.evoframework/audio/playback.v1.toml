@@ -188,6 +188,41 @@ payload is rejected. State surfaces in `now_playing.consume`.
 payload_out = "empty"
 
 [[verbs]]
+name = "get_now_playing"
+payload_in = """
+Empty payload (or bare envelope `{ "v": 1 }`). Read-only
+verb — returns the warden's current now-playing state without
+mutating it. Distinct from the now_playing subject's update
+stream: the subject only emits state on transitions, so a
+fresh subscriber sees nothing until the next play / pause /
+seek / etc. This verb returns the current state on demand so
+UI surfaces can render their initial frame without waiting
+for a transition.
+
+Custody acquisition: dispatching this verb triggers the
+framework's request-op warden-custody bootstrap on the
+playback warden, identical to dispatching any transport
+verb. After this read the warden's supervisor is live; the
+now_playing subject begins emitting on subsequent
+transitions; the standard subject-subscribe path delivers
+deltas.
+"""
+payload_out = """
+UTF-8 JSON payload carrying the same shape as the
+`now_playing` subject's state — `{ v, transport_state,
+track, elapsed_ms, duration_ms, volume, muted, repeat,
+shuffle, single, consume }`. Field semantics, null
+conventions, and the `mpd_path` walk to track/album
+subjects are documented under the now_playing subject
+below.
+
+Consumers SHOULD read once on connect and subscribe to the
+now_playing subject in the same operation (the
+read-then-subscribe pattern) — first render renders from the
+read; subsequent updates render from the subscription.
+"""
+
+[[verbs]]
 name = "emit_test_tone"
 payload_in = """
 Operator-facing wiring diagnostic. The warden synthesises a
@@ -259,7 +294,11 @@ detail = "`freq_hz` must lie in 20..=20000 (audible band); refusal carries the o
 
 [[acceptance]]
 name = "now-playing-published-on-load-and-every-state-transition"
-detail = "The warden announces the `now_playing` subject (addressing `{ scheme = 'evo.audio.playback', value = 'now_playing' }`, subject_type `audio_playback_now_playing`) on load and updates it on every playback state transition (play, pause, stop, track change, seek, set_volume, set_mute, set_repeat, set_shuffle, set_single, set_consume) plus on every regular status poll so elapsed_ms advances live for subscribers. The state payload carries `{ v, transport_state, track, elapsed_ms, duration_ms, volume, muted, repeat, shuffle, single, consume }` where `transport_state` is one of `\"playing\" | \"paused\" | \"stopped\"`, `track` is null when stopped or no current song, else `{ title, artist, album, mpd_path }` (UI walks `mpd_path` to the `track` / `album` subjects for artwork), `elapsed_ms` and `duration_ms` are null when stopped or unknown, `volume` is 0..=100, `muted` reflects the warden's mute-toggle state (not derived from `volume == 0`), and `repeat / shuffle / single / consume` reflect the MPD mode primitives. The subject is the single source of truth for the now-playing surface; out-of-band channels (parallel wire ops, sidecar events, polling) are forbidden. UI consumers subscribe via `SubjectStateSubscriber` and receive state inline on `subject_state_changed.new_state` — both on first render and on every change."
+detail = "The warden announces the `now_playing` subject (addressing `{ scheme = 'evo.audio.playback', value = 'now_playing' }`, subject_type `audio_playback_now_playing`) on load and updates it on every playback state transition (play, pause, stop, track change, seek, set_volume, set_mute, set_repeat, set_shuffle, set_single, set_consume) and on every MPD idle wake. The state payload carries `{ v, transport_state, track, elapsed_ms, duration_ms, volume, muted, repeat, shuffle, single, consume }` where `transport_state` is one of `\"playing\" | \"paused\" | \"stopped\"`, `track` is null when stopped or no current song, else `{ title, artist, album, mpd_path }` (UI walks `mpd_path` to the `track` / `album` subjects for artwork), `elapsed_ms` and `duration_ms` are null when stopped or unknown, `volume` is 0..=100, `muted` reflects the warden's mute-toggle state (not derived from `volume == 0`), and `repeat / shuffle / single / consume` reflect the MPD mode primitives. The subject is the single source of truth for transition deltas; out-of-band sidecar channels are forbidden. NOTE: the framework's subject-subscribe machinery does NOT replay the current state as the first event to a new subscriber — `subject_state_changed` fires only on subsequent transitions. Consumers needing first-render state use the `get_now_playing` read verb (see verbs section) in the canonical read-then-subscribe shape: read once on connect for the initial frame, subscribe to the subject for deltas. Live elapsed-ms advancement between transitions is consumer-side: the consumer interpolates locally from the last reported `elapsed_ms` + wall-clock while `transport_state == \"playing\"`."
+
+[[acceptance]]
+name = "get-now-playing-read-verb-supports-first-render"
+detail = "The warden honours a `get_now_playing` read request_type that returns the current `now_playing` payload synchronously. The verb is read-only (no playback mutation, no queue change) and is the sanctioned surface for first-render state on freshly-connected UI clients. Because the verb is declared in the plugin's respondent.request_types, dispatching it triggers the framework's request-op warden-custody bootstrap so a read works before any transport verb has been issued — the supervisor spawns, queries MPD's current state, and replies. Repeated reads are idempotent and cheap (one MPD `status` + `currentsong` round-trip). Consumers MUST use the read-then-subscribe shape (`get_now_playing` once on connect, subscribe to the now_playing subject for deltas) rather than polling the read verb."
 
 [[acceptance]]
 name = "stream-format-published-on-load-and-every-format-change"
@@ -275,10 +314,10 @@ addressing = { scheme = "evo.audio.playback", value = "now_playing" }
 subject_type = "audio_playback_now_playing"
 description = """
 Live now-playing state the warden is driving. Updates on every
-playback state transition (play, pause, stop, track change, seek,
-volume change, mute toggle, mode-flag changes) AND on every
-regular status poll so `elapsed_ms` advances live for
-subscribers without requiring them to maintain a local clock.
+playback state transition (play, pause, stop, track change,
+seek, volume change, mute toggle, mode-flag changes) and on
+every MPD idle wake. Updates are delta-only — see "First-render
+state" below.
 
 Payload shape (v1):
 
@@ -310,14 +349,27 @@ may legitimately choose 0 as a non-muted setting. `mpd_path`
 is the addressing-value the UI walks to the `track` / `album`
 subjects for artwork and richer metadata.
 
-The subject is the only sanctioned surface for live
-now-playing state; consumers MUST subscribe rather than
-polling a verb. Transport controls (play / pause / stop /
-next / previous / seek / seek_by_delta / set_volume /
-set_mute / set_repeat / set_shuffle / set_single /
-set_consume) dispatch as source verbs against the warden;
-the resulting state change publishes on this subject within
-the same status-poll cycle.
+First-render state. The framework's subject-subscribe
+machinery does NOT replay the current state as the first
+event to a new subscriber — `subject_state_changed` fires
+only on subsequent transitions. Consumers needing first-render
+state use the `get_now_playing` read verb on the warden in
+the canonical read-then-subscribe shape: `get_now_playing`
+once on connect for the initial frame, subscribe to this
+subject for deltas.
+
+Live elapsed advancement. Updates emit only on transitions
+and MPD idle wakes; a steadily-playing track produces no idle
+event (the playhead advancing is not a subsystem change).
+Consumers interpolate `elapsed_ms` locally between updates
+(last reported value + wall-clock delta) while
+`transport_state == "playing"`.
+
+Transport controls (play / pause / stop / next / previous /
+seek / seek_by_delta / set_volume / set_mute / set_repeat /
+set_shuffle / set_single / set_consume) dispatch as source
+verbs against the warden; the resulting state change emits
+on this subject within the dispatch's response window.
 """
 
 [[subjects]]
