@@ -372,8 +372,18 @@ detail = "The rolling window MUST be bounded. The subject's serialised footprint
 name = "multiroom-frame-trace-clock-offset-from-audio-plane"
 detail = "The `clock_offset_ns` field MUST be sourced from the audio-plane's existing NTP-lite clock-sync probe. A multi-room plugin MUST NOT introduce a parallel clock-sync mechanism for trace purposes; the audio-plane sync probe is the single source of truth for cross-node clock alignment."
 
-# NOTE: per-verb payload contracts pending plugin-author
-# review. The reference plugin's manifest declares the
-# request_types it supports; payload contracts are reviewed
-# alongside the reference plugin's wire-surface
-# stabilisation in a future schemas-repo release.
+[[acceptance]]
+name = "local-playback-floor-invariant"
+detail = "Bit-perfect local playback is the floor of every audio device admitting this shelf. For ANY configured role (source / receiver / auto) AND no live group on the substrate (`MultiroomSubstrateHandle::get_group(group_id)` returns `None` or a record with zero members other than the local device), the device's `pcm.evo` MUST resolve to `plug -> hw:CARD=<dac>` and local audio (MPD playback or any pcm.evo writer) MUST reach the DAC bit-perfect. The multi-room plugin MUST NOT hold the DAC playback substream, MUST NOT route audio through a loopback bridge, and MUST NOT spawn any task that opens an ALSA PCM. The floor is enforced structurally, not by configuration discipline: a device configured for any role and idle is indistinguishable from a device never configured for multi-room, at the ALSA layer."
+
+[[acceptance]]
+name = "hardware-claim-gated-on-live-group"
+detail = "Every multi-room plugin path that opens a hardware resource (DAC playback for receiver role, snd-aloop capture for source role, audio-plane peer dial) MUST gate on a live-group check against the substrate (`MultiroomSubstrateHandle::get_group` returns `Some` with at least one non-local member) before claiming the resource. Configured role alone, group_id alone, or group_id + empty members MUST NOT cause any hardware to be opened. The check lives in the same module as the engage_role function so the gate is spatially adjacent to every caller, and so adding a new role variant cannot bypass it by accident."
+
+[[acceptance]]
+name = "runtime-asound-drop-in-composition"
+detail = "Audio routing changes for multi-room MUST be composed at runtime via additive drop-ins under `/etc/asound.d/` and removed when the underlying role transitions away from engaged. The drop-in path for the reference plugin is `/etc/asound.d/10-evo-multiroom-source.conf`; the numeric prefix pins load order ahead of file-name-sorted neighbours (`evo-options.conf` sorts before `10-` so the multi-room override wins when both are present). Drop-in writes MUST be atomic (temp file in the same directory, rename into place); a concurrent reader sees prior contents or next contents, never a partial file. `/etc/asound.conf` itself MUST be a stable, role-independent base whose installation is invariant across devices."
+
+[[acceptance]]
+name = "role-toml-field-is-first-boot-seed-only"
+detail = "The reference plugin's TOML `role` field is documented as a first-boot seed only; live role lives in the framework's `RoleStore` substrate and changes via `set_device_role`. The TOML field MUST NOT determine hardware claim state at any point after first admit. Operator surfaces, UI presentation, and engage-role gating decisions all consult `RoleStore`; the TOML role's only effect is the initial value `RoleStore` admits on first boot when no prior value exists."
