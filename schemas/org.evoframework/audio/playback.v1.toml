@@ -400,3 +400,103 @@ The subject is the only sanctioned surface for live stream
 format; consumers MUST subscribe rather than polling a verb
 or recovering from happenings.
 """
+
+[[subjects]]
+addressing = { scheme = "evo.audio.playback", value = "spectrum_frame" }
+subject_type = "audio_playback_spectrum_frame"
+description = """
+Live real-time spectrum frame the audio terminus is
+computing from the post-mixer audio signal. Updates at a
+target 30 Hz cadence (tier-adaptive: server-tier devices
+may sustain 60 Hz; MCU-tier may step down to 15 Hz on
+backpressure; wire shape is constant). The terminus is the
+canonical owner of every post-mixer audio-derived signal —
+single FFT compute per leader regardless of subscriber
+count or source-plugin diversity.
+
+Sampling point. The terminus captures from a parallel
+`snd-aloop` tap fed by the multi-slave tee in
+`/etc/asound.conf`. Operator-options drop-ins
+(delivery.alsa-managed) compose at `pcm.evo` upstream of
+the tee, so EQ + replay-gain + rate-conversion + volume
+apply BEFORE the terminus reads. Multi-room delay-alignment
+applies INSIDE the terminus on the fan-out path so the
+spectrum reflects the pre-alignment signal — the same
+wavefront every group member plays after their per-member
+delay applies. The primary audio path (pcm.evo to
+hw:CARD=DAC) is unaffected by terminus health; local DAC
+audio cannot be silenced by terminus failure.
+
+Payload shape (v1):
+
+```
+{ v:           1,
+  bins:        256,
+  channels:    2,
+  rate_hz:     30,
+  magnitudes:  [[256 f32 L], [256 f32 R]],
+  peak_hold:   [[256 f32 L], [256 f32 R]],
+  onsets:      { sub_bass, bass, mid, high },
+  correlation: [256 f32],
+  at_ms:       <emit timestamp> }
+```
+
+`magnitudes` are mel-scale (perceptual, not linear-FFT) over
+the [20 Hz, 20 kHz] audible band, normalised to [0, 1].
+Renderers downsample to operator-chosen bin counts (32 /
+64 / 128 / 256) and channel-collapse for mono presentation.
+
+`peak_hold` is the per-bin peak decayed at a perceptual
+rate (~12 dB/s) — eliminates percussive flicker on the
+falling edge of transients while still falling visibly
+between sustained-loud passages.
+
+`onsets` are per-band transient-event booleans (sub_bass
+20-60 Hz, bass 60-250 Hz, mid 250-2000 Hz, high 2000+ Hz)
+fired when the band's spectral flux exceeds the rolling
+mean + k * std-dev of its recent history. Renderer presets
+that respond to musical events (drum hits, cymbal strikes)
+read these instead of magnitude noise.
+
+`correlation` is the per-bin L/R correlation coefficient
+(0 = mono content in one channel only, 1 = perfectly
+correlated true-stereo). Renderer presets that visualise
+stereo imaging (centre-image vs side-image bins, phase
+correlation displays) read this.
+
+First-render state. Like every other audio.playback
+subject, the framework's subject-subscribe machinery does
+not replay the current state as the first event to a new
+subscriber. Consumers needing first-render state use the
+`get_spectrum_frame` read verb on the audio terminus
+(canonical read-then-subscribe shape). Until the first
+frame computes (terminus loaded but capture loop not yet
+delivered its first FFT), the verb returns an empty-frame
+shape (zero magnitudes + zero peak_hold + all-false
+onsets + zero correlation + at_ms=0) so renderers handle
+the "loading" state with the same code path as silence.
+"""
+
+[[acceptance]]
+name = "audio-terminus-is-the-single-sink"
+detail = "Every post-mixer audio-derived signal MUST be computed at the audio terminus plugin (`org.evoframework.audio.terminus` on the `audio.terminus` shelf). Source plugins (MPD today, AirPlay / Cast / Spotify Connect / streaming-radio in the future) write audio to `pcm.evo`; the terminus sees that audio via a parallel `snd-aloop` tap and owns every onward post-mixer projection (spectrum FFT today; loudness telemetry, fingerprinting, on-device transcription as those land). Source plugins MUST NOT compute their own spectrum or claim ownership of any post-mixer signal under the audio.playback shelf — the terminus is the single canonical owner."
+
+[[acceptance]]
+name = "spectrum-payload-v1-shape"
+detail = "The `audio_playback_spectrum_frame` subject's state payload at v1 is `{ v: 1, bins: 256, channels: 2, rate_hz: <actual cadence>, magnitudes: [[256 f32], [256 f32]], peak_hold: [[256 f32], [256 f32]], onsets: { sub_bass, bass, mid, high }, correlation: [256 f32], at_ms: <epoch ms> }`. `magnitudes` and `peak_hold` are mel-scale Float32 in [0, 1] over [20 Hz, 20 kHz]. `onsets` booleans fire on per-band spectral-flux threshold crossings. `correlation` is per-bin L/R coefficient in [0, 1] (0 = mono in one channel, 1 = perfectly-correlated true stereo). `rate_hz` reflects ACTUAL cadence (tier-adaptive); the wire shape is constant. Renderers MUST honour the `v` field and refuse unknown versions."
+
+[[acceptance]]
+name = "spectrum-leader-authoritative"
+detail = "In a multi-room group, only the leader's terminus emits the spectrum subject. Followers MUST NOT publish a parallel `audio_playback_spectrum_frame` subject under the same name. Operator seats subscribed to any member device of the group receive the leader's spectrum — single wavefront, single FFT instance per leader regardless of seat count. The leader-authoritative rule is enforced by the terminus's emit-gate logic, keyed off the leader role surfaced through the framework's RoleStore + MultiroomSubstrateHandle."
+
+[[acceptance]]
+name = "spectrum-tier-adaptive-cadence"
+detail = "The terminus's target FFT cadence is 30 Hz with backpressure tolerance over [15, 60] Hz. Server-tier devices may sustain 60 Hz; Pi-tier devices target 30 Hz; MCU-tier devices step down to 15 Hz on sustained backpressure. The wire shape and payload fields are CONSTANT across cadences; `rate_hz` reflects ACTUAL observed cadence so renderers can pace their interpolation. Cadence changes MUST NOT introduce stale-frame artefacts (renderers receive every frame in order; missed frames manifest as gaps in `at_ms` not as out-of-order arrival)."
+
+[[acceptance]]
+name = "local-playback-floor-invariant-preserved-by-terminus"
+detail = "The audio terminus is a PARALLEL slave of the multi-slave tee defined by `pcm.evo` in `/etc/asound.conf` — the primary slave is `hw:CARD=<dac>` (the local DAC), the terminus tap is a secondary slave (`hw:Loopback,DEV=0,SUBDEV=7`). Terminus failure, absence, or crash MUST NOT silence the primary audio path. The local-playback floor invariant (any device, any configuration, no live multi-room group => `pcm.evo` reaches the DAC bit-perfect) is preserved by construction: if the terminus is down the multi-slave tee still writes to the DAC. Rig acceptance for this row plays audio through a fresh-bootstrapped device with the terminus plugin DISABLED via plugin-management; audio MUST be audibly playing on the DAC throughout."
+
+[[acceptance]]
+name = "get-spectrum-frame-read-verb-for-first-render"
+detail = "The terminus honours a `get_spectrum_frame` read request_type that returns the latest computed spectrum frame synchronously. The verb is read-only (no compute mutation, no subscribe activation) and is the sanctioned surface for first-render state on freshly-connected UI clients (parity with `get_now_playing`). Before the first frame computes (terminus loaded but capture loop yet to deliver), the verb returns an empty-frame shape (zero magnitudes / peak_hold / correlation, all-false onsets, at_ms=0) so renderers handle 'loading' with the same code path as silence. Repeated reads are idempotent. Consumers MUST use the read-then-subscribe shape (`get_spectrum_frame` once on connect for the initial frame, subscribe to the subject for deltas) rather than polling the read verb."
