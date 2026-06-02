@@ -336,6 +336,60 @@ description = "Entity is discovered via mDNS but not yet admitted to the domain.
 name = "revoked"
 description = "Entity was previously admitted and has been operator-revoked. Cards render dimmed theme placeholder + `Revoked` badge; non-interactive until re-admitted."
 
+# Singleton per-node subject that exposes the local node's
+# effective multi-room role to other plugins admitted on the
+# same node. The publishing admission is the local
+# multi-room plugin instance; the addressing value is a
+# constant ("local") because there is exactly one local role
+# per node.
+#
+# The effective role is the post-engagement role the
+# multi-room plugin actually engaged, NOT the operator-set
+# config role. The two can differ when the live-group gate
+# demotes a configured Source / Receiver to Auto (group
+# configured but no non-local members present); consumers
+# care about the engaged role because that drives whether
+# hardware is claimed.
+#
+# Designed for consumers like audio.terminus that need a
+# leader-of-active-group gate without having to dial through
+# the audio_plane capability surface for local_device_id. A
+# subject is the right shape because the local role changes
+# over time (operator gestures, group membership churn) and
+# subscribers want a push-mode signal, not a one-shot read.
+[[subjects]]
+name = "audio_multiroom_local_role"
+description = "Singleton subject carrying the local node's effective multi-room role. Published by the local multi-room plugin instance on every engagement-state change. Subscribers (e.g. audio.terminus) gate behaviour on the local node's role without having to acquire local_device_id through the audio_plane capability."
+
+[[subjects.fields]]
+name = "role"
+type = "local_role"
+description = "Effective engaged role of the local node. `source` and `auto` open the leader-of-active-group gate for consumers; `receiver` closes it. The value reflects the post-engagement role (the engage_role function's effective_role), so a Source / Receiver config demoted to Auto by the live-group gate publishes `auto` here."
+
+[[subjects.enums.local_role]]
+name = "source"
+description = "Local node is the source-host (leader) of an active group with at least one non-local member. The multi-room plugin captures audio and fans frames out via the audio plane."
+
+[[subjects.enums.local_role]]
+name = "receiver"
+description = "Local node is a non-leader member of an active group. The multi-room plugin renders incoming audio frames from the source-host."
+
+[[subjects.enums.local_role]]
+name = "auto"
+description = "Local node has no live multi-room engagement. DAC is free for local playback; no audio-plane participation. Includes both the operator-set `auto` config and any Source / Receiver config that the live-group gate has demoted."
+
+[[acceptance]]
+name = "multiroom-local-role-singleton-per-node"
+detail = "Exactly one `audio_multiroom_local_role` instance per node, with addressing value `local`. The local multi-room plugin instance is the single authoritative publisher. Consumers (audio.terminus, future post-mixer plugins) subscribe to the fixed addressing and receive the local node's effective role without needing to learn their own device id."
+
+[[acceptance]]
+name = "multiroom-local-role-publishes-effective-role"
+detail = "The `audio_multiroom_local_role.role` field MUST carry the post-engagement effective role (the value `engage_role` actually engaged on), NOT the operator-set config role. The two differ when the live-group gate demotes a configured Source / Receiver to Auto. Consumers gate on engaged-role because that drives hardware-claim state."
+
+[[acceptance]]
+name = "multiroom-local-role-published-at-load-and-on-every-change"
+detail = "The local-role subject MUST be announced (with state seeded) at plugin load and updated on every `engage_role` transition. Consumers connecting between plugin load and the first transition MUST see the current effective role immediately, not an empty payload."
+
 [[acceptance]]
 name = "multiroom-device-card-envelope-unified-across-cases"
 detail = "The `MultiroomDeviceCardEnvelope` value shape MUST be identical across solo device, group leader, group member, subgroup, and master-group entities. Discrimination by transport_state + state_badge + master_group_context only; no per-case envelope variants."
