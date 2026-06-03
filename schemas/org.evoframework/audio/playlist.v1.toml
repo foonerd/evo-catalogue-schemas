@@ -1,0 +1,208 @@
+# Schema for the `audio.playlist` shelf at shape version 1.
+#
+# Playlist shelves host operator-curated stored playlists —
+# named, persistent ordered lists of URIs the operator
+# composes. Distinct from the live queue (audio.queue): a
+# playlist is intent + identity that survives across queue
+# rewrites, MPD restart, source-availability churn.
+#
+# Reference plugin: `org.evoframework.playback.mpd` in
+# evo-device-audio. The plugin owns this shelf alongside
+# audio.playback, audio.queue, audio.favourites, audio.library.
+#
+# MPD's stored-playlist namespace (`listplaylists`,
+# `playlistinfo NAME`, `load`, `save`, `playlistadd`,
+# `playlistdelete`, `playlistclear`, `playlistmove`, `rename`,
+# `rm`) is the persistence layer; the plugin wires verbs to
+# MPD commands without introducing a parallel store.
+
+schema_version = 1
+rack = "audio"
+shelf = "playlist"
+shape = 1
+
+description = """
+Operator-curated stored playlists. Named, persistent ordered
+lists of URIs the operator composes; survives across queue
+rewrites, MPD restart, and source-availability churn. Mixed-
+source playlists are first-class — playlist entries from
+offline sources persist; the per-entry available flag
+reflects current source state when loaded to the queue.
+
+Distinct from the live queue (audio.queue): a playlist is
+intent + identity; the queue is the current playback ordering.
+`queue.load_playlist_to_queue` materialises a playlist into
+the queue.
+"""
+
+[[requests]]
+request_type = "playlist.list_playlists"
+description = """
+List every stored playlist. Returns
+`{ v: 1, playlists: [PlaylistSummary...] }` where each summary is
+`{ name: string, item_count: u32, modified_at_ms: u64 | null }`.
+
+`modified_at_ms` is MPD's `Last-Modified` field projected to
+epoch milliseconds (null when MPD does not report it).
+
+Idempotent + cheap (one MPD `listplaylists` round-trip).
+Consumers use the read-then-subscribe pattern: this verb once
+on connect, then subscribe to `audio_playlist_index` for deltas.
+"""
+
+[[requests]]
+request_type = "playlist.get_playlist"
+description = """
+Read one stored playlist's full contents. Payload is
+`{ v: 1, name: string }`. Returns
+`{ v: 1, name: string, items: [PlaylistItem...], item_count: u32 }`
+where each item is
+`{ position: u32, uri: string, source_id: string | null,
+   title: string | null, artist: string | null,
+   album: string | null, duration_ms: u64 | null, available: bool }`.
+
+`available` reflects the song's `evo:available` sticker AND
+the source's current state at query time. Items from offline
+sources surface with `available: false`.
+
+Refusal on unknown name is a structured Permanent error
+naming the offending name.
+"""
+
+[[requests]]
+request_type = "playlist.create_playlist"
+description = """
+Create a new empty playlist. Payload is `{ v: 1, name: string }`.
+Refusal on name collision is a structured Permanent error
+naming the existing playlist. Refusal on invalid name
+(empty, contains path separator `/`, longer than 128 bytes,
+contains control characters) is structured.
+
+MPD's stored-playlist namespace forbids `/` in names; the
+plugin enforces the same bound + the additional length /
+control-character bounds for operational hygiene.
+"""
+
+[[requests]]
+request_type = "playlist.delete_playlist"
+description = """
+Delete a stored playlist. Payload is `{ v: 1, name: string }`.
+Refusal on unknown name is structured. Deletion does not
+affect any item currently in the queue (the queue carries
+its own copy of the entries).
+
+The system-managed favourites playlist (the playlist whose
+name matches the operator-configured favourites name; see
+audio.favourites.v1) is refused for deletion via this verb;
+favourites lifecycle goes through `favourites.clear_favourites`.
+"""
+
+[[requests]]
+request_type = "playlist.rename_playlist"
+description = """
+Rename a stored playlist. Payload is
+`{ v: 1, from_name: string, to_name: string }`. Refusal on
+unknown source name or collision on destination name is
+structured.
+"""
+
+[[requests]]
+request_type = "playlist.add_to_playlist"
+description = """
+Append URIs to a stored playlist. Payload is
+`{ v: 1, name: string, uris: [string...] }`. Items append in
+order; existing items are preserved.
+
+URIs are accepted regardless of current source state — the
+playlist is intent + identity; per-entry availability is a
+runtime concern surfaced via `playlist.get_playlist`.
+"""
+
+[[requests]]
+request_type = "playlist.remove_from_playlist"
+description = """
+Remove items from a stored playlist by position. Payload is
+`{ v: 1, name: string, positions: [u32...] }`. Positions are
+zero-based against the playlist's current order. Positions
+that exceed the playlist length are silently skipped (no
+refusal — operator UI may have stale position data).
+Duplicates in the positions array are deduplicated.
+
+The operation is atomic against MPD's playlist file (single
+playlist-write commit); partial application on failure is
+forbidden.
+"""
+
+[[requests]]
+request_type = "playlist.move_in_playlist"
+description = """
+Move an item to a new position within a stored playlist.
+Payload is `{ v: 1, name: string, from_position: u32,
+to_position: u32 }`. Position past the playlist length
+clamps to end-of-playlist.
+"""
+
+[[acceptance]]
+name = "playlist-respondent-cardinality"
+detail = "Only one plugin may claim this shelf at a time. Co-owned with audio.playback / audio.queue / audio.favourites / audio.library by org.evoframework.playback.mpd in the reference distribution."
+
+[[acceptance]]
+name = "playlist-mpd-namespace-is-authoritative"
+detail = "MPD's stored-playlist namespace (`listplaylists`, `playlistinfo NAME`, `load`, `save`, `playlistadd`, `playlistdelete`, `playlistclear`, `playlistmove`, `rename`, `rm`) is the persistence layer. The plugin MUST NOT maintain a parallel playlist store. A contributor introducing a sidecar persistence layer (sqlite table, json file outside MPD's playlists directory, etc.) violates the invariant."
+
+[[acceptance]]
+name = "playlist-index-subject-published-on-load-and-every-mutation"
+detail = "The plugin announces the `audio_playlist_index` subject (addressing `{ scheme = 'evo.audio.playlist', value = 'index' }`, subject_type `audio_playlist_index`) on load and updates it on every playlist mutation (create, delete, rename, add_to, remove_from, move_in) and on every MPD `idle stored_playlist` wake (covers external MPD playlist edits if any operator path bypasses the framework verbs). The subject is the single source of truth for the playlist index; out-of-band sidecar channels are forbidden."
+
+[[acceptance]]
+name = "playlist-create-name-bounds"
+detail = "Names MUST satisfy: non-empty, length in [1, 128] bytes, no path separator `/`, no control characters (codepoints < 0x20 or = 0x7F). Refusal carries the offending name + the violated bound. MPD's own namespace rejects `/`; the framework's additional length + control-character bounds protect operational hygiene + filesystem safety."
+
+[[acceptance]]
+name = "playlist-deletion-protects-system-managed-favourites"
+detail = "`playlist.delete_playlist` refuses to delete the playlist whose name matches the operator-configured favourites name (see audio.favourites.v1). Favourites lifecycle goes through the audio.favourites shelf's verbs; the protection prevents accidental loss of curated favourites via the generic playlist verb."
+
+[[acceptance]]
+name = "playlist-loading-loads-full-regardless-of-availability"
+detail = "Mixed-source playlists with entries from offline sources MUST load every entry when materialised to the queue via `queue.load_playlist_to_queue` / `queue.append_playlist_to_queue` (see audio.queue.v1). Pre-filtering by availability at playlist-read or queue-load time is forbidden; the per-entry available flag carries runtime state; skip-traversal handles unreachable items at play-time. The invariant preserves operator curation across source-availability churn."
+
+[[acceptance]]
+name = "playlist-mutation-atomicity"
+detail = "Bulk operations (`add_to_playlist` with multi-URI payload, `remove_from_playlist` with multi-position payload) MUST be atomic against MPD's playlist file. The plugin uses MPD's `command_list_begin` / `command_list_end` (or equivalent batched primitive) to commit the bulk change in one playlist-write; partial application on failure is forbidden. On batched-write failure, the playlist reverts to its pre-call state."
+
+[[subjects]]
+addressing = { scheme = "evo.audio.playlist", value = "index" }
+subject_type = "audio_playlist_index"
+description = """
+Live index of stored playlists. Updates on every playlist
+mutation (create, delete, rename, add_to, remove_from,
+move_in) and on every MPD `idle stored_playlist` wake.
+
+Payload shape (v1):
+
+```
+{
+  "v":         1,
+  "playlists": [PlaylistSummary...]
+}
+```
+
+Where each PlaylistSummary is:
+
+```
+{
+  "name":            string,
+  "item_count":      u32,
+  "modified_at_ms":  u64 | null  // MPD's Last-Modified, epoch ms
+}
+```
+
+The index carries summaries only — full playlist contents are
+returned by `playlist.get_playlist`. Operator UI's playlist
+list / picker consumes this subject; the picker drills down
+to full contents via the read verb on selection.
+
+First-render state. Consumers use `playlist.list_playlists`
+once on connect for the initial frame, subscribe to this
+subject for deltas.
+"""

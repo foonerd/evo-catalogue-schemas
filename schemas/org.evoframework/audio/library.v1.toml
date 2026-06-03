@@ -1,0 +1,416 @@
+# Schema for the `audio.library` shelf at shape version 1.
+#
+# Library shelves host the operator-facing music library
+# surface: source registry (the set of registered library
+# roots and their per-source reachability state), browse,
+# search, and scan orchestration. The source registry is the
+# load-bearing primitive for the device's mixed-source
+# resilience contract — every library root is a typed,
+# reachability-aware source with its own state machine,
+# scan policy, and configuration shape.
+#
+# Reference plugin: `org.evoframework.playback.mpd` in
+# evo-device-audio. The plugin owns this shelf alongside
+# audio.playback, audio.queue, audio.playlist, audio.favourites.
+#
+# Source-state awareness. Each source's reachability state
+# (Probing / Online / Degraded / Offline / Retired) is
+# observable as part of `audio_library_sources` subject's
+# state. The plugin's per-source supervisor probes each
+# source at its type-specific cadence and transitions the
+# state machine; the sticker reconciler marks every song
+# under an Offline source as `evo:available=0` so consumers
+# (queue, playlist, favourites, browse, search) surface the
+# per-song available flag honestly.
+#
+# Lazy-scan for cloud. Cloud sources default to
+# LazyBrowseDriven scan policy — `browse_library` walks the
+# cloud's directory tree one level on operator demand;
+# eager batch scan is opt-in only. The lazy default refuses
+# Volumio's "rescan everything" pattern that hours-eats
+# operator state and trips cloud rate limits.
+
+schema_version = 1
+rack = "audio"
+shelf = "library"
+shape = 1
+
+description = """
+Source-state-aware music library surface. Operator manages
+the set of registered library sources (local-internal,
+local-USB, NAS over SMB / NFS, cloud Google Drive / OneDrive,
+future DLNA); each source is a typed record with a
+reachability state machine, type-specific scan policy, and
+operator-visible last-seen-online + scan-progress fields.
+Browse, search, update, rescan orchestration goes through
+this shelf. Cloud sources default to lazy-browse-driven
+scan; eager batch scan is opt-in per source.
+
+Cross-shelf contract. The plugin's per-source supervisor +
+sticker reconciler maintain the `evo:available` per-song
+sticker that audio.queue / audio.playlist / audio.favourites
+project as their per-item `available` flag. The library
+shelf is the single source of truth for source state and
+per-song availability; consumer shelves MUST derive their
+available flags from the sticker (see audio.queue.v1
+acceptance row `queue-item-available-flag-derives-from-sticker`).
+"""
+
+# ----- Source-registration verbs -----
+
+[[requests]]
+request_type = "library.list_sources"
+description = """
+Read the full source registry. Returns
+`{ v: 1, sources: [SourceRecord...], total: u32 }` where each
+SourceRecord is:
+
+```
+{
+  "id":                       string,           // uuid
+  "display_name":             string,
+  "kind":                     SourceKind,       // tagged enum below
+  "mount_path":               string,           // filesystem path
+  "mpd_storage_name":         string | null,    // MPD mount alias
+  "state":                    SourceState,      // tagged enum
+  "last_seen_online_at_ms":   u64 | null,
+  "probe_cadence_ms":         u32,
+  "scan_policy":              ScanPolicy,
+  "track_count":              u32,
+  "track_count_available":    u32,
+  "last_scan_at_ms":          u64 | null
+}
+```
+
+SourceKind tagged-kind enum:
+
+```
+{ "kind": "local_internal" }
+{ "kind": "local_usb", "device_node": string, "label": string }
+{ "kind": "network_nas_smb", "server": string, "share": string, "username": string }
+{ "kind": "network_nas_nfs", "server": string, "export": string }
+{ "kind": "cloud_gdrive",   "account_ref": string }
+{ "kind": "cloud_onedrive", "account_ref": string }
+{ "kind": "network_dlna",   "service_id": string }
+```
+
+SourceState tagged-kind enum:
+
+```
+{ "kind": "probing" }
+{ "kind": "online" }
+{ "kind": "degraded", "reason": string, "since_ms": u64 }
+{ "kind": "offline",  "reason": string, "since_ms": u64 }
+{ "kind": "retired" }
+```
+
+ScanPolicy tagged-kind enum:
+
+```
+{ "kind": "eager_incremental",  "on_online": bool, "on_mount_event": bool }
+{ "kind": "lazy_browse_driven", "prefetch_recent": u32 }
+{ "kind": "browse_only" }
+```
+
+Idempotent + cheap. Consumers use the read-then-subscribe
+pattern against the `audio_library_sources` subject.
+"""
+
+[[requests]]
+request_type = "library.add_source"
+description = """
+Register a new library source. Payload is
+`{ v: 1, display_name: string, kind: SourceKind,
+   mount_path: string, scan_policy: ScanPolicy | null,
+   probe_cadence_ms: u32 | null,
+   cloud_eager_scan_acknowledged: bool | null }`.
+
+`scan_policy` and `probe_cadence_ms` default to type-specific
+values when null (local_internal: eager_incremental + 60s;
+local_usb: eager_incremental + 5s; network_nas: eager_incremental
++ 30s; cloud: lazy_browse_driven + 300s; dlna: browse_only + 60s).
+
+`cloud_eager_scan_acknowledged` is required when registering a
+cloud source with `eager_incremental` scan policy; the operator-
+confirmed acknowledgement gates against accidental opt-in to
+the eager-scan-on-cloud anti-pattern (rate-limit trips, hours-
+long initial scan). Refusal carries the offending policy +
+the missing acknowledgement field.
+
+Returns `{ v: 1, source_id: string }`. The plugin spawns the
+source's supervisor immediately; the first probe runs within
+one probe cadence; `audio_library_sources` subject updates as
+the state machine transitions Probing → (Online | Offline).
+"""
+
+[[requests]]
+request_type = "library.remove_source"
+description = """
+Deregister a library source. Payload is
+`{ v: 1, source_id: string, scrub_mpd_entries: bool }`.
+
+When `scrub_mpd_entries: true` the plugin runs MPD `update`
+against the source's mount path AFTER unmounting, scrubbing
+the songs from MPD's database. When false, MPD entries persist
+(survive remount as a same-named source) but the source's
+state machine transitions Retired and its songs are marked
+`evo:available=0` permanently for that source-id.
+
+Refusal on unknown source_id is a structured Permanent error.
+Refusal on attempt to remove the local-internal source (the
+device's always-present floor library) is structured (the
+local-internal source is registered automatically at plugin
+load and is not removable via this verb).
+"""
+
+[[requests]]
+request_type = "library.probe_source"
+description = """
+Trigger an immediate reachability probe on a source. Payload
+is `{ v: 1, source_id: string }`. Returns
+`{ v: 1, source_id: string, state: SourceState,
+   probed_at_ms: u64, probe_duration_ms: u32 }`.
+
+Synchronous: the verb returns after the probe completes (or
+times out per the probe's type-specific budget). Idempotent;
+the result reflects the just-probed state. Operator UI uses
+this verb for "test connection" gestures; the `audio_library_sources`
+subject's update fires for any state transition.
+"""
+
+[[requests]]
+request_type = "library.wake_source"
+description = """
+Attempt to bring an offline source back online. Payload is
+`{ v: 1, source_id: string }`. The wake handler is source-
+type-specific:
+
+- `local_internal` / `local_usb`: equivalent to `probe_source`
+  (no remount logic; mount is OS-managed).
+- `network_nas_smb` / `network_nas_nfs`: attempts a remount
+  using the source's stored config; falls through to probe.
+- `cloud_gdrive` / `cloud_onedrive`: triggers an auth-token
+  refresh attempt (via the operator-configured account
+  primitive); falls through to probe.
+
+Returns `{ v: 1, source_id: string, woke: bool, state: SourceState }`.
+`woke: true` indicates the wake handler ran a non-trivial
+recovery step (remount succeeded, token refreshed); `woke: false`
+indicates the handler was a passive probe. The `state` field
+reflects the post-handler state.
+"""
+
+[[requests]]
+request_type = "library.update_source"
+description = """
+Trigger an incremental MPD update against a source's mount
+path. Payload is `{ v: 1, source_id: string, force_rescan: bool }`.
+
+When `force_rescan: true` the plugin issues MPD `rescan`
+(re-reads every file's metadata regardless of mtime); when
+false, MPD `update` (incremental, mtime-driven). Refusal on
+source whose state is `offline` is structured (`source_offline`
+error kind; recovery hint: `wake_source`); the operator must
+wake the source first.
+
+Returns `{ v: 1, source_id: string, scan_started: bool }`.
+Scan progress is published on the `audio_library_scan_progress`
+subject; `audio_library_state` subject's `active_scans` list
+reflects the in-flight set.
+"""
+
+[[requests]]
+request_type = "library.browse_library"
+description = """
+Browse a source's directory tree one level. Payload is
+`{ v: 1, source_id: string, path: string | null }`. `path`
+null reads the source's root.
+
+Returns `{ v: 1, source_id: string, path: string, entries:
+[BrowseEntry...], stale: bool, source_state: SourceState }`.
+
+Each entry is one of:
+
+```
+{ "kind": "directory", "name": string, "uri": string }
+{ "kind": "file", "name": string, "uri": string,
+  "title": string | null, "artist": string | null,
+  "album": string | null, "duration_ms": u64 | null,
+  "available": bool }
+{ "kind": "playlist", "name": string, "uri": string }
+```
+
+`stale: true` indicates the browse-tree cache served the
+listing (source is offline; the cached snapshot is what's
+returned). `stale: false` indicates a live read against the
+source.
+
+Cloud sources execute the browse via the cloud's native list
+API (Google Drive `files.list?q=parent`, OneDrive
+`/children`) — this is the lazy-scan primitive that walks
+the cloud tree on demand instead of eager-batch-scanning.
+"""
+
+[[requests]]
+request_type = "library.search_library"
+description = """
+Search across registered sources. Payload is
+`{ v: 1, query: string, source_ids: [string...] | null,
+   include_offline: bool, max_results: u32 }`.
+
+`source_ids` null means search every Online source;
+explicit list filters to that subset. `include_offline: false`
+(default) skips Offline sources silently; `true` includes
+them and serves results from the browse-tree cache when
+available + the cached listing is non-empty (stale results
+are flagged per-entry).
+
+`max_results` is capped at 1000 by the framework; values
+above 1000 are clamped silently.
+
+Returns `{ v: 1, results: [SearchResult...], truncated: bool,
+            stale_sources: [string...] }`. Each SearchResult
+mirrors BrowseEntry with the `kind` discriminant + an additional
+`source_id: string` field.
+
+Cloud sources execute the search via the cloud's native
+search API (Google Drive `q=name contains 'X'`, OneDrive
+`$search=X`); local sources delegate to MPD's `search`
+command; NAS sources also via MPD's search against the
+mounted path.
+"""
+
+# ----- Acceptance rows -----
+
+[[acceptance]]
+name = "library-respondent-cardinality"
+detail = "Only one plugin may claim this shelf at a time. Co-owned with audio.playback / audio.queue / audio.playlist / audio.favourites by org.evoframework.playback.mpd in the reference distribution."
+
+[[acceptance]]
+name = "source-offline-never-triggers-update"
+detail = "The per-source supervisor's Offline transition handler MUST NOT call MPD `update PATH` or MPD `rescan PATH`. Update against an unreachable mount produces spurious 'song removed' entries and corrupts operator-curated state. The transition handler runs ONLY the sticker reconciler (`evo:available=0` on every song under the source's mount path). This invariant is the structural protection against the Volumio wipe-on-remount anti-pattern."
+
+[[acceptance]]
+name = "sticker-is-availability-source-of-truth"
+detail = "The `evo:available` per-song MPD sticker is the single source of truth for per-song availability. Consumer shelves (audio.queue, audio.playlist, audio.favourites, browse / search results) project the sticker as their per-item `available` flag. The plugin MUST NOT maintain a parallel availability store; future contributors introducing a sidecar consistency model violate the invariant."
+
+[[acceptance]]
+name = "cloud-default-scan-policy-is-lazy"
+detail = "Cloud sources (`cloud_gdrive`, `cloud_onedrive`, future cloud variants) default to `ScanPolicy::LazyBrowseDriven { prefetch_recent: 0 }`. Registering a cloud source with `ScanPolicy::EagerIncremental` requires the operator-confirmed `cloud_eager_scan_acknowledged: true` field on the add_source request; refusal is structured. The lazy default refuses the eager-scan-on-cloud anti-pattern (rate-limit trips, hours-long scans, externally-mutating libraries)."
+
+[[acceptance]]
+name = "source-supervisor-per-source-isolation"
+detail = "Each source's reachability probe + state machine + scan trigger runs on its own supervisor task. A slow / hung probe on one source MUST NOT block probes on others. A failing probe MUST NOT crash the plugin; failures transition the source's state to Offline + log structured cause + persist the last-seen-online timestamp."
+
+[[acceptance]]
+name = "library-state-subject-published-on-load-and-every-source-transition"
+detail = "The plugin announces the `audio_library_sources` + `audio_library_state` subjects on load. `audio_library_sources` updates on every source state-machine transition + on every operator add_source / remove_source. `audio_library_state` updates on every scan-state change (scan started, scan completed) + on every batched track-count change. The subjects are the single source of truth; out-of-band sidecar channels are forbidden."
+
+[[acceptance]]
+name = "scan-progress-subject-only-during-active-scans"
+detail = "The `audio_library_scan_progress` subject is announced on load with empty state `{ v: 1, scans: [] }`. During active scans (MPD `updating_db` field non-zero, or per-source supervisor-driven scan in-flight) the subject's state carries the per-source scan progress; on scan completion the entry is removed and the subject updates. UI consumers read the subject for the live progress; the subject is bounded by the active-scan count which is small (typically 1-2)."
+
+[[acceptance]]
+name = "local-internal-source-is-non-removable"
+detail = "The plugin registers the local-internal source automatically at plugin load (using the operator-configured `music_directory` from /etc/mpd.conf as the mount path; default `/var/lib/evo/music/INTERNAL`). `library.remove_source` refuses on the local-internal source's id with a structured Permanent error. The local-internal source is the device's floor library; making it removable would create an empty-library state with no recovery path."
+
+[[acceptance]]
+name = "browse-library-returns-stale-cache-when-source-offline"
+detail = "`browse_library` against an Offline source returns the last cached browse-tree listing (when one exists) with `stale: true` + `source_state: { kind: 'offline', ... }`. Refusal on Offline source is forbidden — the UI's browse view stays operable for offline sources (operator can still see what's in their NAS even when the NAS is down) with the staleness flag carrying the freshness contract. Sources with no cached listing return empty entries + `stale: true`."
+
+# ----- Subjects -----
+
+[[subjects]]
+addressing = { scheme = "evo.audio.library", value = "sources" }
+subject_type = "audio_library_sources"
+description = """
+Live per-source registry state. Updates on every source
+state-machine transition (Probing → Online, Online → Offline,
+Online → Degraded, etc.) + on every operator add_source /
+remove_source.
+
+Payload shape (v1):
+
+```
+{
+  "v":       1,
+  "sources": [SourceRecord...],
+  "total":   u32
+}
+```
+
+SourceRecord shape mirrors the `list_sources` return value.
+See the verb section for the full SourceKind / SourceState /
+ScanPolicy tagged-kind enum shapes.
+
+First-render state. Consumers use `library.list_sources` once
+on connect for the initial frame, subscribe to this subject
+for deltas.
+"""
+
+[[subjects]]
+addressing = { scheme = "evo.audio.library", value = "state" }
+subject_type = "audio_library_state"
+description = """
+Global library aggregate state. Updates on every scan-state
+change (scan started, scan completed) + on every batched
+track-count change.
+
+Payload shape (v1):
+
+```
+{
+  "v":                       1,
+  "total_tracks":            u32,
+  "total_tracks_available":  u32,
+  "last_full_scan_at_ms":    u64 | null,
+  "active_scans":            [string...]   // source_ids with in-flight scans
+}
+```
+
+Consumers (operator UI's library overview panel) read this
+once on connect via a future `library.get_state` read verb
+(out of v1 scope; v1 consumers fetch via list_sources +
+client-side aggregate) and subscribe for live updates.
+"""
+
+[[subjects]]
+addressing = { scheme = "evo.audio.library", value = "scan_progress" }
+subject_type = "audio_library_scan_progress"
+description = """
+Live per-source scan progress. Only updates during active
+scans; outside of active scans the subject's state is
+empty (`{ v: 1, scans: [] }`).
+
+Payload shape (v1):
+
+```
+{
+  "v":     1,
+  "scans": [ScanProgress...]
+}
+```
+
+Where each ScanProgress is:
+
+```
+{
+  "source_id":            string,
+  "kind":                 "update" | "rescan",
+  "started_at_ms":        u64,
+  "scanned_tracks":       u32,
+  "estimated_total":      u32 | null,
+  "current_relative_path": string | null
+}
+```
+
+`estimated_total` is null for incremental updates (MPD does
+not report a total ahead of time); populated for explicit
+rescan when the plugin pre-walks the source's directory tree.
+`current_relative_path` is the source-relative path of the
+file MPD is currently reading (may be null between files).
+
+UI consumers render a progress bar driven by `scanned_tracks
+/ estimated_total` when both fields are non-null; otherwise
+render an indeterminate indicator.
+"""

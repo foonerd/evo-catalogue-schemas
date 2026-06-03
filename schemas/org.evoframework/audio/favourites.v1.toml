@@ -1,0 +1,193 @@
+# Schema for the `audio.favourites` shelf at shape version 1.
+#
+# Favourites is a system-managed stored playlist surfaced
+# under operator-facing favourites semantics. The persistence
+# layer is MPD's stored-playlist namespace — favourites are
+# realised as a single playlist whose name matches the
+# operator-configured favourites name (default `__favourites__`).
+#
+# Distinct shelf because the operator-facing semantics differ
+# from generic playlists: favourites is a binary
+# (favourited / not), order is operator-managed insertion-
+# order, deletion of the entire favourites set goes through
+# this shelf's `clear_favourites` verb (not the generic
+# playlist-delete verb which refuses for the system-managed
+# name), and the wire surface carries `is_favourite(uri)`
+# membership-test semantics not present on the generic
+# playlist shelf.
+#
+# Reference plugin: `org.evoframework.playback.mpd` in
+# evo-device-audio.
+
+schema_version = 1
+rack = "audio"
+shelf = "favourites"
+shape = 1
+
+description = """
+System-managed favourites surface. Operator marks tracks +
+streams as favourites via `add_favourite`; the framework
+persists the set as a system-managed stored playlist (see
+audio.playlist.v1 for the persistence layer). Mixed-source
+favourites are first-class — favourites entries from offline
+sources persist; the per-entry available flag reflects
+current source state when read.
+
+Wire-surface distinction from generic playlists: favourites
+expose `is_favourite(uri)` membership-test semantics; the
+favourites playlist is protected from accidental deletion via
+the generic `playlist.delete_playlist` verb; favourites'
+lifecycle goes through this shelf's `clear_favourites`.
+"""
+
+[[requests]]
+request_type = "favourites.list_favourites"
+description = """
+Read the current favourites list. Returns
+`{ v: 1, items: [FavouriteItem...], count: u32 }` where each
+item is
+`{ position: u32, uri: string, source_id: string | null,
+   title: string | null, artist: string | null,
+   album: string | null, duration_ms: u64 | null,
+   available: bool, added_at_ms: u64 | null }`.
+
+`added_at_ms` carries the operator's add-favourite timestamp
+when the framework recorded it; null on entries imported from
+external favourites lists where the timestamp is not
+preserved.
+
+Idempotent + cheap. Consumers use the read-then-subscribe
+pattern: this verb once on connect, then subscribe to
+`audio_favourites` for deltas.
+"""
+
+[[requests]]
+request_type = "favourites.is_favourite"
+description = """
+Membership-test verb. Payload is `{ v: 1, uri: string }`.
+Returns `{ v: 1, uri: string, is_favourite: bool }`.
+
+UI consumers typically batch-call this verb against the
+visible song list on the now-playing / browse / search views
+to render the favourite star. The verb is read-only + cheap
+(membership-test against the in-memory favourites set the
+plugin maintains alongside the persisted playlist).
+"""
+
+[[requests]]
+request_type = "favourites.add_favourite"
+description = """
+Add a URI to favourites. Payload is `{ v: 1, uri: string }`.
+Append-to-end semantics; duplicates are silently no-op'd
+(the favourites set is a set, not a list with duplicates).
+
+URIs are accepted regardless of current source state — the
+favourites set carries operator intent; runtime availability
+surfaces via `list_favourites`.
+
+Returns empty payload; the `audio_favourites` subject's
+update is the fanned-out result.
+"""
+
+[[requests]]
+request_type = "favourites.remove_favourite"
+description = """
+Remove a URI from favourites. Payload is `{ v: 1, uri: string }`.
+Refusal on URI not currently in favourites is a structured
+Permanent error naming the URI — UI consumers can disambiguate
+"already removed" (Ok) from "never favourited" (Err) via the
+prior `is_favourite` read.
+"""
+
+[[requests]]
+request_type = "favourites.clear_favourites"
+description = """
+Remove every URI from favourites. Empty payload accepted.
+This is the only sanctioned path for wholesale favourites
+clearance; the generic `playlist.delete_playlist` refuses on
+the favourites playlist's name.
+
+Operator UI MUST gate this verb behind an explicit confirm
+gesture; the verb itself does not require step-up but the
+destructive scope warrants UI-side double-confirmation.
+"""
+
+[[requests]]
+request_type = "favourites.move_favourite"
+description = """
+Move a favourite to a new position. Payload is
+`{ v: 1, uri: string, to_position: u32 }`. Position past the
+favourites length clamps to end. Refusal on URI not in
+favourites is structured.
+
+Operator-facing semantics: favourites order is operator-
+managed (default insertion-order); the move verb supports
+manual reordering for UI drag-handle gestures.
+"""
+
+[[acceptance]]
+name = "favourites-respondent-cardinality"
+detail = "Only one plugin may claim this shelf at a time. Co-owned with audio.playback / audio.queue / audio.playlist / audio.library by org.evoframework.playback.mpd in the reference distribution."
+
+[[acceptance]]
+name = "favourites-persisted-as-system-managed-playlist"
+detail = "The favourites set MUST be persisted as a single MPD stored playlist whose name matches the operator-configured favourites name (default `__favourites__`; configurable via the plugin's manifest config block). The plugin MUST NOT maintain a parallel favourites store. The playlist's contents ARE the favourites; reading the favourites is reading the playlist."
+
+[[acceptance]]
+name = "favourites-playlist-protected-from-generic-delete"
+detail = "The playlist whose name matches the favourites name MUST be refused for deletion via `playlist.delete_playlist` (see audio.playlist.v1). Favourites lifecycle is only mutated through this shelf's verbs. The protection prevents accidental loss of curated favourites via the generic playlist verb."
+
+[[acceptance]]
+name = "favourites-set-semantics-on-add"
+detail = "`favourites.add_favourite` enforces set semantics — adding a URI already in favourites is a silent no-op (Ok response, no subject update). Duplicates in the favourites playlist are forbidden. A contributor that allows duplicates by writing through the generic playlist verb violates the invariant; the audio.favourites verbs are the single mutation path."
+
+[[acceptance]]
+name = "favourites-subject-published-on-load-and-every-mutation"
+detail = "The plugin announces the `audio_favourites` subject (addressing `{ scheme = 'evo.audio.favourites', value = 'set' }`, subject_type `audio_favourites`) on load and updates it on every favourites mutation (add, remove, clear, move). The subject is the single source of truth for favourites state; out-of-band sidecar channels are forbidden."
+
+[[acceptance]]
+name = "favourites-is-favourite-membership-cheap"
+detail = "`favourites.is_favourite` MUST be O(1) membership-test (in-memory hash set keyed by URI). The plugin maintains an in-memory set mirrored from the persisted playlist; UI batched calls against the visible song list MUST NOT trigger per-call MPD round-trips. The mirror is refreshed on add / remove / clear / move + on the `audio_favourites` subject's announce; staleness against external MPD playlist edits (if any operator path bypasses the framework verbs) is bounded by the next `idle stored_playlist` wake cycle."
+
+[[subjects]]
+addressing = { scheme = "evo.audio.favourites", value = "set" }
+subject_type = "audio_favourites"
+description = """
+Live favourites set state. Updates on every favourites
+mutation (add, remove, clear, move) and on the persisted
+playlist's `idle stored_playlist` wake (covers external MPD
+playlist edits if any operator path bypasses the framework
+verbs).
+
+Payload shape (v1):
+
+```
+{
+  "v":     1,
+  "items": [FavouriteItem...],
+  "count": u32
+}
+```
+
+Where each FavouriteItem is:
+
+```
+{
+  "position":     u32,
+  "uri":          string,
+  "source_id":    string | null,
+  "title":        string | null,
+  "artist":       string | null,
+  "album":        string | null,
+  "duration_ms":  u64 | null,
+  "available":    bool,
+  "added_at_ms":  u64 | null
+}
+```
+
+First-render state. Consumers use `favourites.list_favourites`
+once on connect for the initial frame, subscribe to this
+subject for deltas. UI consumers also use the read verb
+`favourites.is_favourite` for per-URI membership checks (cheap
+O(1) against the in-memory mirror).
+"""

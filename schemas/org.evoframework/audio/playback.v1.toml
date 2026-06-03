@@ -500,3 +500,91 @@ detail = "The audio terminus is a PARALLEL slave of the multi-slave tee defined 
 [[acceptance]]
 name = "get-spectrum-frame-read-verb-for-first-render"
 detail = "The terminus honours a `get_spectrum_frame` read request_type that returns the latest computed spectrum frame synchronously. The verb is read-only (no compute mutation, no subscribe activation) and is the sanctioned surface for first-render state on freshly-connected UI clients (parity with `get_now_playing`). Before the first frame computes (terminus loaded but capture loop yet to deliver), the verb returns an empty-frame shape (zero magnitudes / peak_hold / correlation, all-false onsets, at_ms=0) so renderers handle 'loading' with the same code path as silence. Repeated reads are idempotent. Consumers MUST use the read-then-subscribe shape (`get_spectrum_frame` once on connect for the initial frame, subscribe to the subject for deltas) rather than polling the read verb."
+
+[[acceptance]]
+name = "disposition-emitted-on-autonomous-decisions"
+detail = "The playback warden emits a Disposition record to the `audio_playback_disposition` subject on every autonomous decision it makes on the operator's behalf — skip-traversal past an unreachable source / not-found file / decoder failure / permission denial, pause-on-mid-track-source-disconnect, queue-exhausted-no-playable. A Disposition is distinct from an Error (which is the response to an operator-issued verb) and from a Happening (a state change broadcast). Dispositions are durable + ring-buffered (last 32 entries persisted across plugin reload). Consecutive skips of the same kind from the same source MUST coalesce into a single `tracks_skipped_run` Disposition with `count + from_position + to_position`; per-item emission for runs is forbidden."
+
+[[acceptance]]
+name = "disposition-shape-is-shelf-agnostic-shared-sdk-type"
+detail = "The Disposition wire-payload shape is a shared SDK type (`evo_plugin_sdk::contract::disposition::Disposition`) so cross-cutting subsystems (multiroom leader-change, source-routing fallback, trust-chain anomaly) emit dispositions on their own happening streams using the same wire shape. The shape: `{ v: u32, at_ms: u64, kind: DispositionKind, queue_position: u32 | null, track_uri: string | null, source_id: string | null, source_state_at_decision: SourceState | null, action_taken: DispositionAction, recovery_hint: RecoveryHint | null, runs: { count: u32, from_position: u32, to_position: u32 } | null }`. DispositionKind / DispositionAction / RecoveryHint are tagged-kind enums; future variants ride at v=1 with `#[serde(other)]` fallback for unknown kinds."
+
+[[subjects]]
+addressing = { scheme = "evo.audio.playback", value = "disposition" }
+subject_type = "audio_playback_disposition"
+description = """
+Durable ring buffer of the most recent autonomous decisions
+the playback warden made on the operator's behalf. The
+buffer holds the last 32 entries; older entries age out as
+new dispositions land. Persisted across plugin reload.
+
+Payload shape (v1):
+
+```
+{
+  "v":            1,
+  "dispositions": [Disposition...]   // most recent first
+}
+```
+
+Each Disposition mirrors the shared SDK
+`evo_plugin_sdk::contract::disposition::Disposition` shape:
+
+```
+{
+  "v":                          u32,
+  "at_ms":                      u64,
+  "kind":                       DispositionKind,
+  "queue_position":             u32 | null,
+  "track_uri":                  string | null,
+  "source_id":                  string | null,
+  "source_state_at_decision":   SourceState | null,
+  "action_taken":               DispositionAction,
+  "recovery_hint":              RecoveryHint | null,
+  "runs":                       { "count": u32, "from_position": u32,
+                                  "to_position": u32 } | null
+}
+```
+
+DispositionKind tagged-kind enum (initial v1 set):
+
+```
+{ "kind": "track_skipped_source_offline" }
+{ "kind": "track_skipped_file_not_found" }
+{ "kind": "track_skipped_permission_denied" }
+{ "kind": "track_skipped_decoder_failure" }
+{ "kind": "track_skipped_rate_limited" }
+{ "kind": "playback_paused_source_offline" }
+{ "kind": "queue_exhausted_no_playable" }
+{ "kind": "tracks_skipped_run" }   // coalesced; `runs` non-null
+```
+
+DispositionAction tagged-kind enum:
+
+```
+{ "kind": "skip_forward" }
+{ "kind": "skip_backward" }
+{ "kind": "pause" }
+{ "kind": "stop" }
+{ "kind": "retry_at_next_advance" }
+```
+
+RecoveryHint tagged-kind enum (initial v1 set):
+
+```
+{ "kind": "wake_source",        "source_id": string }
+{ "kind": "rescan_source",      "source_id": string }
+{ "kind": "remount_usb",        "source_id": string }
+{ "kind": "reauth_cloud",       "source_id": string }
+{ "kind": "check_mount_permissions", "source_id": string }
+{ "kind": "inspect_track",      "uri": string }
+{ "kind": "add_playable_track" }
+```
+
+First-render state. UI consumers fetch via a future
+`get_dispositions` read verb (out of v1 scope; v1 consumers
+fetch the subject's first state event on subscribe) and
+subscribe for live updates. Each new disposition fires the
+`audio.playback.disposition` happening so toast / notification
+consumers receive deltas.
+"""

@@ -1,0 +1,262 @@
+# Schema for the `audio.queue` shelf at shape version 1.
+#
+# Queue shelves host the live playback queue — the ordered list
+# of items the playback warden walks through. The shelf is
+# respondent-shaped: every operator gesture against the queue
+# (inspect, enqueue, remove, move, clear, load-from-playlist,
+# save-as-playlist) dispatches as a request. The queue's
+# live state is published as the `audio_queue` subject so
+# consumers (operator UI's Queue panel) consume via the
+# read-then-subscribe pattern.
+#
+# Reference plugin: `org.evoframework.playback.mpd` in
+# evo-device-audio. The plugin owns this shelf alongside
+# `audio.playback`, `audio.playlist`, `audio.favourites`, and
+# `audio.library` — a single plugin owns all five because
+# MPD's connection model and stored-playlist namespace are
+# single-source-of-truth (one plugin, multiple shelves).
+#
+# Source-state awareness. The queue is the load-bearing wire
+# surface for the device's mixed-source resilience contract.
+# Items carry a per-item `available: bool` derived from the
+# library's per-song sticker (`evo:available`). UI consumers
+# grey-out unavailable items rather than vanishing them; the
+# operator's curation survives source-offline cycles. The
+# playback warden's skip-traversal walks past unavailable
+# items and emits dispositions to the `audio_playback_disposition`
+# subject on the audio.playback shelf — see audio.playback.v1
+# §"Skip-traversal and disposition" for the cross-shelf
+# composition.
+
+schema_version = 1
+rack = "audio"
+shelf = "queue"
+shape = 1
+
+description = """
+Live playback queue — the ordered list of items the playback
+warden walks. Operator gestures against the queue (inspect,
+enqueue, remove, move, clear, load from playlist, save as
+playlist) dispatch as requests; the live queue state is
+published as the `audio_queue` subject for read-then-subscribe
+consumers. Each item carries a per-item `available` flag
+derived from the per-song availability sticker the library
+shelf maintains; unavailable items remain in the queue and
+are surfaced as greyed-out by the UI.
+"""
+
+# Request types the framework dispatches against this shelf.
+# Mutation verbs return empty (the subject update is the
+# fanned-out result); read verbs return the queue listing.
+[[requests]]
+request_type = "queue.get_queue"
+description = """
+Read the current queue. Returns the queue listing as
+`{ v: 1, items: [QueueItem...], length: u32, current_position: u32 | null }`
+where each QueueItem is
+`{ id: u32, position: u32, uri: string, source_id: string | null,
+   title: string | null, artist: string | null, album: string | null,
+   duration_ms: u64 | null, available: bool }`.
+
+`id` is MPD's per-queue-item songid (stable across re-orderings
+within the current MPD lifetime); `position` is the zero-based
+queue position (mutates on reorder). `source_id` is the
+library source the URI resolves to (null when the URI resolves
+to no registered source — e.g. a transient stream URL). `available`
+is `true` when the song's `evo:available` sticker is `1` AND
+the source's current state is `Online` or `Degraded`; `false`
+otherwise.
+
+Idempotent + cheap (one MPD `playlistinfo` round-trip + a
+sticker-batch read). Consumers use the read-then-subscribe
+pattern: this verb once on connect, then subscribe to the
+`audio_queue` subject for deltas.
+"""
+
+[[requests]]
+request_type = "queue.enqueue"
+description = """
+Append one or more items to the queue. Payload is
+`{ v: 1, uris: [string...], position: u32 | null }`. When
+`position` is null the items append to the end of the queue;
+when non-null the items insert at that position and existing
+items shift right.
+
+Each URI must resolve under a registered library source's
+MPD storage path. URIs that resolve to a source whose current
+state is `Offline` are accepted (the queue carries operator
+intent; availability is a runtime concern); the resulting
+queue items carry `available: false` until the source returns.
+
+Returns empty payload; the `audio_queue` subject's update is
+the fanned-out result.
+"""
+
+[[requests]]
+request_type = "queue.remove_queue_item"
+description = """
+Remove a single item from the queue. Payload is
+`{ v: 1, id: u32 }` where `id` is the queue item's MPD songid
+from the `audio_queue` subject. Refusal on unknown id is a
+structured Permanent error naming the offending id.
+
+Removing the currently-playing item stops playback; the next
+operator `play` advances to the new position-0 item.
+"""
+
+[[requests]]
+request_type = "queue.move_queue_item"
+description = """
+Move a single item to a new queue position. Payload is
+`{ v: 1, id: u32, to_position: u32 }`. Moving an item past
+the queue length clamps to end-of-queue.
+"""
+
+[[requests]]
+request_type = "queue.clear_queue"
+description = """
+Remove every item from the queue. Empty payload accepted (no
+fields required). Stops playback if a song is currently
+playing; the queue subject's update reflects empty + null
+current_position.
+"""
+
+[[requests]]
+request_type = "queue.load_playlist_to_queue"
+description = """
+Load a stored playlist's contents to the queue, replacing the
+current queue. Payload is `{ v: 1, playlist_name: string,
+start_position: u32 | null }`. `start_position` defaults to
+null (do not auto-start playback); when non-null the warden
+starts playback at the given position after the load.
+
+Mixed-source playlists are loaded in full regardless of
+current source states; per-item `available` flags reflect
+current state and skip-traversal handles unreachable items
+at play-time.
+"""
+
+[[requests]]
+request_type = "queue.append_playlist_to_queue"
+description = """
+Append a stored playlist's contents to the end of the queue
+(does not replace). Payload is `{ v: 1, playlist_name: string }`.
+"""
+
+[[requests]]
+request_type = "queue.save_queue_as_playlist"
+description = """
+Save the current queue's contents as a stored playlist.
+Payload is `{ v: 1, playlist_name: string, overwrite: bool }`.
+Refusal on name collision when `overwrite: false` is a
+structured Permanent error naming the existing playlist.
+Refusal on empty queue is structured.
+"""
+
+[[requests]]
+request_type = "queue.skip_to_next_available"
+description = """
+Operator-issued skip-traversal trigger. The warden walks
+from `current_position + 1` past every unavailable item
+and starts playback at the first available item. Emits the
+disposition record(s) to the `audio_playback_disposition`
+subject (see audio.playback.v1) for the autonomous skip
+decision(s).
+
+Refuses with `queue_exhausted_no_playable` disposition + a
+structured Permanent error when no available item exists
+past the current position.
+"""
+
+# Acceptance rows — invariants the shelf contract pins
+# against future contributor drift. These are informational
+# at admission today (no runtime assertion harness yet); they
+# document what a future shape-conformance test would check.
+[[acceptance]]
+name = "queue-respondent-cardinality"
+detail = "Only one plugin may claim this shelf at a time. The shelf is co-owned with audio.playback by the same plugin in the reference distribution (org.evoframework.playback.mpd); the cardinality refusal is at admission per plugin, not per shelf claim."
+
+[[acceptance]]
+name = "queue-subject-published-on-load-and-every-mutation"
+detail = "The plugin announces the `audio_queue` subject (addressing `{ scheme = 'evo.audio.queue', value = 'queue' }`, subject_type `audio_queue`) on load and updates it on every queue mutation (enqueue, remove, move, clear, load_playlist_to_queue, append_playlist_to_queue, skip_to_next_available) and on every MPD `idle playlist` wake (covers MPD-side mutations from `clear`/`add`/`delete`/`move` called by the playback supervisor's transport path). The subject is the single source of truth for queue state; out-of-band sidecar channels are forbidden."
+
+[[acceptance]]
+name = "queue-item-available-flag-derives-from-sticker"
+detail = "Each `QueueItem.available` field MUST be derived from the song's `evo:available` sticker (managed by the library shelf's source-state reconciler). The plugin MUST NOT compute availability from any other signal (filesystem stat, mount-table check, ad-hoc TCP probe). The sticker is the single source of truth; a contributor wiring a parallel availability check violates the invariant."
+
+[[acceptance]]
+name = "queue-load-playlist-loads-full-regardless-of-availability"
+detail = "`queue.load_playlist_to_queue` and `queue.append_playlist_to_queue` MUST load every entry from the named playlist regardless of current source state. Pre-filtering by availability is forbidden — the queue carries operator intent; the per-item `available` flag carries runtime state; skip-traversal handles unreachable items at play-time. The invariant preserves operator curation across source-availability churn."
+
+[[acceptance]]
+name = "queue-get-read-verb-supports-first-render"
+detail = "`queue.get_queue` is read-only (no queue mutation) and is the sanctioned surface for first-render state on freshly-connected UI clients. Consumers MUST use the read-then-subscribe shape (`queue.get_queue` once on connect, subscribe to the `audio_queue` subject for deltas) rather than polling the read verb. Repeated reads are idempotent and cheap (one MPD `playlistinfo` round-trip + a sticker-batch read)."
+
+[[acceptance]]
+name = "queue-skip-to-next-available-emits-disposition"
+detail = "`queue.skip_to_next_available` MUST emit one or more disposition records to the `audio_playback_disposition` subject (see audio.playback.v1). The dispositions document the autonomous skip decisions made on the operator's behalf and carry the recovery hints the UI consumes. Per-item dispositions for runs of consecutive same-kind same-source skips MUST coalesce into a single `TracksSkippedRun` disposition with `count + from_position + to_position` — per-item emission for runs is forbidden."
+
+# Subjects the plugin announces. Consumers (operator UI's
+# Queue panel) resolve the addressing below against the
+# framework's subject querier and subscribe via
+# SubjectStateSubscriber.
+
+[[subjects]]
+addressing = { scheme = "evo.audio.queue", value = "queue" }
+subject_type = "audio_queue"
+description = """
+Live playback queue state. Updates on every queue mutation
+(enqueue, remove, move, clear, load_playlist_to_queue,
+append_playlist_to_queue, skip_to_next_available) and on
+every MPD `idle playlist` wake (covers MPD-side queue
+mutations from the playback supervisor's `clear`/`add` path
+during transport verbs like `play_now`).
+
+Payload shape (v1):
+
+```
+{
+  "v":                 1,
+  "items":             [QueueItem...],
+  "length":            u32,
+  "current_position":  u32 | null
+}
+```
+
+Where each QueueItem is:
+
+```
+{
+  "id":           u32,            // MPD songid (stable per lifetime)
+  "position":     u32,            // zero-based queue position
+  "uri":          string,         // resolves under a library source's MPD path
+  "source_id":    string | null,  // library source uuid; null for unsourced URIs
+  "title":        string | null,
+  "artist":       string | null,
+  "album":        string | null,
+  "duration_ms":  u64 | null,
+  "available":    bool            // derived from evo:available sticker + source state
+}
+```
+
+`current_position` is the zero-based position of the
+currently-playing item; null when no song is playing.
+
+First-render state. The framework's subject-subscribe
+machinery does not replay the current state as the first
+event to a new subscriber. Consumers needing first-render
+state use the `queue.get_queue` read verb in the canonical
+read-then-subscribe shape: read once on connect for the
+initial frame, subscribe to the subject for deltas.
+
+Large-queue payloads. The queue subject's state payload can
+grow large (a 1000-track queue with full metadata is
+~200 KiB). The framework's subject-state size cap applies; if
+the queue exceeds the cap the plugin truncates to the first
+N items (N is operator-configurable via audio.options;
+default 500) and surfaces a `truncated: true` field at the
+top level. UI consumers handle truncation by issuing
+follow-up read verbs paginated by position range — a
+future v2 of this shelf adds pagination request types if
+operator UX requires it.
+"""
