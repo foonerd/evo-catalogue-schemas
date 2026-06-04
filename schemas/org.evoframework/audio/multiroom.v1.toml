@@ -223,7 +223,7 @@ description = "URL of the theme-contributed device-placeholder artwork. Rendered
 [[subjects.fields]]
 name = "master_group_context"
 type = "option<master_group_context>"
-description = "Set when the entity is a member of a master group (subgroup extension lands in a follow-on release). Carries the master group's id + display name and the operator-configured per-member delay readback alongside the audible-time-honest computed delay. None in the current release (flat groups only)."
+description = "Set when the entity is a member of a master group. Carries the master group's id + display name and the operator-configured per-member delay readback alongside the audible-time-honest computed delay. Always `None` in the current distribution — the master-group hierarchy is flat; the field is reserved-but-unset for forward wire-shape stability."
 
 [[subjects.fields]]
 name = "last_update_at"
@@ -257,12 +257,12 @@ type = "option<string>"
 description = "Track album when known. Same semantics as `artist`."
 
 # Master-group context record. Set when the entity is a
-# member of a master group (subgroup extension; follow-on release). The
-# audible-time field is computed per the §4.8
-# honest-degradation telemetry; consumers render it
-# alongside (or in place of) the configured delay so the
-# operator sees what the device actually plays, not what
-# the configuration claims it plays.
+# member of a master group. The audible-time field is
+# computed per the §4.8 honest-degradation telemetry;
+# consumers render it alongside (or in place of) the
+# configured delay so the operator sees what the device
+# actually plays, not what the configuration claims it
+# plays.
 [[subjects.record_types.master_group_context]]
 name = "master_group_id"
 type = "string"
@@ -276,7 +276,7 @@ description = "Operator-visible display name of the master group."
 [[subjects.record_types.master_group_context]]
 name = "delay_ms"
 type = "i32"
-description = "Operator-configured per-member delay for this entity within the master group (per-member-delay tuning lands in a follow-on release). Negative values indicate the entity plays earlier than the group's reference; positive values indicate later."
+description = "Operator-configured per-member delay for this entity within the master group. Negative values indicate the entity plays earlier than the group's reference; positive values indicate later. Schema-declared so the wire shape is stable; per-member-delay tuning is hardware-gated on the audible-time honesty contract, not yet exposed by the current distribution's wire op surface."
 
 [[subjects.record_types.master_group_context]]
 name = "audible_time_ms"
@@ -300,11 +300,11 @@ description = "Entity is a non-leader member of a group. The group's name + the 
 
 [[subjects.enums.state_badge]]
 name = "subgroup_of_master"
-description = "Entity is a subgroup within a master group (master-group hierarchy lands in a follow-on release)."
+description = "Entity is a subgroup within a master group. Schema-declared so the wire shape is stable; the master-group hierarchy is flat in the current distribution."
 
 [[subjects.enums.state_badge]]
 name = "master_group"
-description = "Entity is itself a master group (master-group hierarchy lands in a follow-on release)."
+description = "Entity is itself a master group. Schema-declared so the wire shape is stable; the master-group hierarchy is flat in the current distribution."
 
 # Transport state enum. Operator-visible per the
 # state-to-visual mapping in the public design-doc mirror.
