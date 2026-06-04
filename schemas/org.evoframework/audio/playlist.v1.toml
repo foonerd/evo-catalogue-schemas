@@ -170,6 +170,14 @@ detail = "Mixed-source playlists with entries from offline sources MUST load eve
 name = "playlist-mutation-atomicity"
 detail = "Bulk operations (`add_to_playlist` with multi-URI payload, `remove_from_playlist` with multi-position payload) MUST be atomic against MPD's playlist file. The plugin uses MPD's `command_list_begin` / `command_list_end` (or equivalent batched primitive) to commit the bulk change in one playlist-write; partial application on failure is forbidden. On batched-write failure, the playlist reverts to its pre-call state."
 
+[[acceptance]]
+name = "playlist-index-counts-reflect-mpd-truth"
+detail = "Every `audio_playlist_index.playlists[].item_count` value emitted on the wire MUST reflect MPD's actual playlist file-line count when known, OR be JSON `null` when the count has not yet been determined. The literal value `0` MUST mean `zero items`; using `0` as a placeholder when the count is unknown is the banned `default-zero lie` pattern. The plugin populates counts on warm-start rehydration via MPD's `command_list_ok_begin` batched `listplaylist NAME` dispatch (O(1) round-trips for N playlists) and refreshes on every `stored_playlist` idle event. A contributor reintroducing the hardcoded `item_count: 0` default — or any equivalent fabricated-zero on an unknown — violates this invariant."
+
+[[acceptance]]
+name = "wire-shape-defaults-must-be-truth-or-null"
+detail = "Generalisation of the count-truth invariant across this shelf: every wire-shape field whose semantic value is `not yet known` MUST serialise as JSON `null` (mapped from `Option::None` in the implementation), not as a typed zero / empty-string / empty-array placeholder. The pattern `set the field to 0 / empty so the consumer sees a well-formed payload` is forbidden because it makes the consumer unable to distinguish `known to be zero` from `not known yet`. Future fields added to this shelf MUST honour the same invariant; the audio.favourites.v1 / audio.library.v1 / audio.queue.v1 contracts apply the same rule."
+
 [[subjects]]
 addressing = { scheme = "evo.audio.playlist", value = "index" }
 subject_type = "audio_playlist_index"
@@ -192,8 +200,10 @@ Where each PlaylistSummary is:
 ```
 {
   "name":            string,
-  "item_count":      u32,
-  "modified_at_ms":  u64 | null  // MPD's Last-Modified, epoch ms
+  "item_count":      u32 | null,    // null when the count has
+                                    // not yet been determined
+                                    // from MPD; never lies with 0
+  "modified_at_ms":  u64 | null     // MPD's Last-Modified, epoch ms
 }
 ```
 
@@ -201,6 +211,15 @@ The index carries summaries only — full playlist contents are
 returned by `playlist.get_playlist`. Operator UI's playlist
 list / picker consumes this subject; the picker drills down
 to full contents via the read verb on selection.
+
+Operator-truth contract — `item_count`. The field carries
+MPD's actual file-line count when known and `null` when not
+yet determined. The literal value `0` MUST mean "zero items"
+and only zero items; it MUST NOT be used as a placeholder
+when the count is unknown. Consumers render `null` as a
+neutral "—" or hide the count badge; rendering `null` as
+"0 tracks" lies to the operator about the playlist's
+contents and is forbidden as a consumer behaviour.
 
 First-render state. Consumers use `playlist.list_playlists`
 once on connect for the initial frame, subscribe to this
