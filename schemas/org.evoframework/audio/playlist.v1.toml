@@ -59,11 +59,19 @@ Read one stored playlist's full contents. Payload is
 where each item is
 `{ position: u32, uri: string, source_id: string | null,
    title: string | null, artist: string | null,
-   album: string | null, duration_ms: u64 | null, available: bool }`.
+   album: string | null, duration_ms: u64 | null,
+   available: bool | null }`.
 
-`available` reflects the song's `evo:available` sticker AND
-the source's current state at query time. Items from offline
-sources surface with `available: false`.
+`available` carries the per-item truth cascade — `true` /
+`false` when the truth is known (sticker explicit OR
+source-state derivable); `null` when the truth has not yet
+been determined (Probing source + no sticker, or unregistered
+source). The cascade is shared with audio.queue.v1 +
+audio.favourites.v1 via the framework's
+`compute_item_available` primitive. See acceptance row
+`playlist-item-available-cascade-emits-null-on-unknown` below
+for the truth-derivation contract. Items from offline sources
+surface with `available: false`.
 
 Refusal on unknown name is a structured Permanent error
 naming the offending name.
@@ -173,6 +181,10 @@ detail = "Bulk operations (`add_to_playlist` with multi-URI payload, `remove_fro
 [[acceptance]]
 name = "playlist-index-counts-reflect-mpd-truth"
 detail = "Every `audio_playlist_index.playlists[].item_count` value emitted on the wire MUST reflect MPD's actual playlist file-line count when known, OR be JSON `null` when the count has not yet been determined. The literal value `0` MUST mean `zero items`; using `0` as a placeholder when the count is unknown is the banned `default-zero lie` pattern. The plugin populates counts on warm-start rehydration via MPD's `command_list_ok_begin` batched `listplaylist NAME` dispatch (O(1) round-trips for N playlists) and refreshes on every `stored_playlist` idle event. A contributor reintroducing the hardcoded `item_count: 0` default — or any equivalent fabricated-zero on an unknown — violates this invariant."
+
+[[acceptance]]
+name = "playlist-item-available-cascade-emits-null-on-unknown"
+detail = "When the per-item availability truth has not yet been determined — the song's resolved source is in `Probing` state and no `evo:available` sticker exists, OR the song does not resolve to any registered source — `PlaylistItem.available` MUST serialise as JSON `null` (mapped from `Option::None` in the implementation). The literal `false` MUST mean KNOWN unreachable (sticker explicit `0` OR source `Offline` / `Retired`); using `false` as a placeholder when the truth is unknown is the banned `default-falsy lie` pattern. The cascade lives in the shared `crate::availability::compute_item_available` primitive — audio.queue.v1 + audio.favourites.v1 + audio.playlist.v1 all consume the same cascade so the per-item projection cannot drift between shelves."
 
 [[acceptance]]
 name = "wire-shape-defaults-must-be-truth-or-null"

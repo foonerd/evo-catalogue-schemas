@@ -49,7 +49,17 @@ item is
 `{ position: u32, uri: string, source_id: string | null,
    title: string | null, artist: string | null,
    album: string | null, duration_ms: u64 | null,
-   available: bool, added_at_ms: u64 | null }`.
+   available: bool | null, added_at_ms: u64 | null }`.
+
+`available` carries the per-item truth cascade — `true` /
+`false` when the truth is known (sticker explicit OR
+source-state derivable); `null` when the truth has not yet
+been determined (Probing source + no sticker, or unregistered
+source). The cascade is shared with audio.queue.v1 +
+audio.playlist.v1 via the framework's `compute_item_available`
+primitive. See acceptance row
+`favourites-item-available-cascade-emits-null-on-unknown`
+below for the truth-derivation contract.
 
 `added_at_ms` carries the operator's add-favourite timestamp
 when the framework recorded it; null on entries imported from
@@ -149,6 +159,10 @@ detail = "The plugin announces the `audio_favourites` subject (addressing `{ sch
 name = "favourites-is-favourite-membership-cheap"
 detail = "`favourites.is_favourite` MUST be O(1) membership-test (in-memory hash set keyed by URI). The plugin maintains an in-memory set mirrored from the persisted playlist; UI batched calls against the visible song list MUST NOT trigger per-call MPD round-trips. The mirror is refreshed on add / remove / clear / move + on the `audio_favourites` subject's announce; staleness against external MPD playlist edits (if any operator path bypasses the framework verbs) is bounded by the next `idle stored_playlist` wake cycle."
 
+[[acceptance]]
+name = "favourites-item-available-cascade-emits-null-on-unknown"
+detail = "When the per-item availability truth has not yet been determined — the song's resolved source is in `Probing` state and no `evo:available` sticker exists, OR the song does not resolve to any registered source — `FavouriteItem.available` MUST serialise as JSON `null` (mapped from `Option::None` in the implementation). The literal `false` MUST mean KNOWN unreachable (sticker explicit `0` OR source `Offline` / `Retired`); using `false` as a placeholder when the truth is unknown is the banned `default-falsy lie` pattern. The cascade is the shared `crate::availability::compute_item_available` primitive — audio.queue.v1 + audio.playlist.v1 + audio.favourites.v1 all consume the same cascade so the per-item projection cannot drift between shelves."
+
 [[subjects]]
 addressing = { scheme = "evo.audio.favourites", value = "set" }
 subject_type = "audio_favourites"
@@ -180,7 +194,7 @@ Where each FavouriteItem is:
   "artist":       string | null,
   "album":        string | null,
   "duration_ms":  u64 | null,
-  "available":    bool,
+  "available":    bool | null,
   "added_at_ms":  u64 | null
 }
 ```

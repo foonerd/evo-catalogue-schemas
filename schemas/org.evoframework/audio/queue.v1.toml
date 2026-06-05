@@ -56,16 +56,31 @@ Read the current queue. Returns the queue listing as
 where each QueueItem is
 `{ id: u32, position: u32, uri: string, source_id: string | null,
    title: string | null, artist: string | null, album: string | null,
-   duration_ms: u64 | null, available: bool }`.
+   duration_ms: u64 | null, available: bool | null }`.
 
 `id` is MPD's per-queue-item songid (stable across re-orderings
 within the current MPD lifetime); `position` is the zero-based
 queue position (mutates on reorder). `source_id` is the
 library source the URI resolves to (null when the URI resolves
-to no registered source — e.g. a transient stream URL). `available`
-is `true` when the song's `evo:available` sticker is `1` AND
-the source's current state is `Online` or `Degraded`; `false`
-otherwise.
+to no registered source — e.g. a transient stream URL).
+
+`available` carries the per-item truth cascade:
+
+- `true` when the song's `evo:available` sticker is `1`, OR when
+  no sticker exists yet but the resolved source is `Online` /
+  `Degraded` (source is reachable; the sticker reconciler has
+  not yet traversed this song).
+- `false` when the sticker is `0`, OR when the resolved source
+  is `Offline` / `Retired`.
+- `null` when the truth has not yet been determined: the
+  resolved source is still `Probing` (initial state pre-probe
+  completion) and no sticker exists, OR the song does not
+  resolve to any registered source. Operator UI renders `null`
+  neutrally (no UNAVAIL decoration); skip-traversal does NOT
+  hop on `null` (optimistic — MPD's own playback ACK codes
+  surface the truth for items the cascade cannot resolve).
+  See acceptance row `wire-shape-defaults-must-be-truth-or-null`
+  for the contract.
 
 Idempotent + cheap (one MPD `playlistinfo` round-trip + a
 sticker-batch read). Consumers use the read-then-subscribe
@@ -86,7 +101,10 @@ Each URI must resolve under a registered library source's
 MPD storage path. URIs that resolve to a source whose current
 state is `Offline` are accepted (the queue carries operator
 intent; availability is a runtime concern); the resulting
-queue items carry `available: false` until the source returns.
+queue items carry `available: false` until the source returns
+(or `null` when the source is still Probing — see the
+`available` field's truth-cascade documentation on
+`queue.get_queue`).
 
 Returns empty payload; the `audio_queue` subject's update is
 the fanned-out result.
@@ -182,7 +200,15 @@ detail = "The plugin announces the `audio_queue` subject (addressing `{ scheme =
 
 [[acceptance]]
 name = "queue-item-available-flag-derives-from-sticker"
-detail = "Each `QueueItem.available` field MUST be derived from the song's `evo:available` sticker (managed by the library shelf's source-state reconciler). The plugin MUST NOT compute availability from any other signal (filesystem stat, mount-table check, ad-hoc TCP probe). The sticker is the single source of truth; a contributor wiring a parallel availability check violates the invariant."
+detail = "Each `QueueItem.available` field MUST be derived from the song's `evo:available` sticker (managed by the library shelf's source-state reconciler), cascading to the resolved source's reachability state when the sticker has not yet been written. The plugin MUST NOT compute availability from any other signal (filesystem stat, mount-table check, ad-hoc TCP probe). The sticker + source-state cascade is the single source of truth; a contributor wiring a parallel availability check violates the invariant."
+
+[[acceptance]]
+name = "queue-item-available-cascade-emits-null-on-unknown"
+detail = "When the per-item availability truth has not yet been determined — the song's resolved source is in `Probing` state and no `evo:available` sticker exists, OR the song does not resolve to any registered source — `QueueItem.available` MUST serialise as JSON `null` (mapped from `Option::None` in the implementation). The literal `false` MUST mean KNOWN unreachable (sticker explicit `0` OR source `Offline` / `Retired`); using `false` as a placeholder when the truth is unknown is the banned `default-falsy lie` pattern. The cascade lives in `crate::availability::compute_item_available` and is shared with audio.favourites.v1 + audio.playlist.v1 so the three shelves' per-item projection cannot drift."
+
+[[acceptance]]
+name = "queue-warm-start-probes-registered-sources"
+detail = "On plugin load, after the warm-start rehydration of the four shelf subjects completes, the plugin MUST kick a source-probe task for every source the registry holds. Probing transitions Probing → Online/Degraded/Offline; the resulting source-state-change broadcast wakes the sticker reconciler which writes the per-song `evo:available` stickers. Without this warm-start kick, every freshly-registered source stays in `Probing` indefinitely and the per-item availability cascade has nothing to cascade from. Best-effort: per-source probe failures log and leave the source in `Probing`; the wire still reports `null` honestly. The kick is non-blocking (probes run in spawned tasks); warm-start does not block on probe completion."
 
 [[acceptance]]
 name = "queue-load-playlist-loads-full-regardless-of-availability"
