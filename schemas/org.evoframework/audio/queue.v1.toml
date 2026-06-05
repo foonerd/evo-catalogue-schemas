@@ -56,7 +56,14 @@ Read the current queue. Returns the queue listing as
 where each QueueItem is
 `{ id: u32, position: u32, uri: string, source_id: string | null,
    title: string | null, artist: string | null, album: string | null,
-   duration_ms: u64 | null, available: bool | null }`.
+   duration_ms: u64 | null, available: bool | null,
+   composer: string | null, composer_sort: string | null,
+   conductor: string | null, ensemble: string | null,
+   performer: string | null, work: string | null,
+   work_sort: string | null, movement: string | null,
+   movement_number: u32 | null, original_date: string | null,
+   recording_date: string | null, label: string | null,
+   medium: string | null }`.
 
 `id` is MPD's per-queue-item songid (stable across re-orderings
 within the current MPD lifetime); `position` is the zero-based
@@ -205,6 +212,10 @@ detail = "Each `QueueItem.available` field MUST be derived from the song's `evo:
 [[acceptance]]
 name = "queue-item-available-cascade-emits-null-on-unknown"
 detail = "When the per-item availability truth has not yet been determined — the song's resolved source is in `Probing` state and no `evo:available` sticker exists, OR the song does not resolve to any registered source — `QueueItem.available` MUST serialise as JSON `null` (mapped from `Option::None` in the implementation). The literal `false` MUST mean KNOWN unreachable (sticker explicit `0` OR source `Offline` / `Retired`); using `false` as a placeholder when the truth is unknown is the banned `default-falsy lie` pattern. The cascade lives in `crate::availability::compute_item_available` and is shared with audio.favourites.v1 + audio.playlist.v1 so the three shelves' per-item projection cannot drift."
+
+[[acceptance]]
+name = "queue-track-classical-metadata-fields-are-truth-or-null"
+detail = "Every `QueueItem` MUST project the 13 classical-music metadata fields (composer, composer_sort, conductor, ensemble, performer, work, work_sort, movement, movement_number, original_date, recording_date, label, medium) from the song's MPD tag set. Each field MUST serialise as JSON `null` when MPD's corresponding tag is absent or empty; empty strings or fabricated zeros are forbidden per the wire-shape-defaults-must-be-truth-or-null invariant (PLUGIN_CONTRACT.md §15). The fields are populated by the shared `MpdConnection`-level classical-tag parser so the queue / favourites / playlist / library / now_playing surfaces project from one source and cannot drift."
 
 [[acceptance]]
 name = "queue-warm-start-probes-registered-sources"

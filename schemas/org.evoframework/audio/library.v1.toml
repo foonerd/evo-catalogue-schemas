@@ -236,7 +236,14 @@ Each entry is one of:
 { "kind": "file", "name": string, "uri": string,
   "title": string | null, "artist": string | null,
   "album": string | null, "duration_ms": u64 | null,
-  "available": bool }
+  "available": bool,
+  "composer": string | null, "composer_sort": string | null,
+  "conductor": string | null, "ensemble": string | null,
+  "performer": string | null, "work": string | null,
+  "work_sort": string | null, "movement": string | null,
+  "movement_number": u32 | null,
+  "original_date": string | null, "recording_date": string | null,
+  "label": string | null, "medium": string | null }
 { "kind": "playlist", "name": string, "uri": string }
 ```
 
@@ -317,6 +324,10 @@ detail = "The plugin registers the local-internal source automatically at plugin
 [[acceptance]]
 name = "browse-library-returns-stale-cache-when-source-offline"
 detail = "`browse_library` against an Offline source returns the last cached browse-tree listing (when one exists) with `stale: true` + `source_state: { kind: 'offline', ... }`. Refusal on Offline source is forbidden — the UI's browse view stays operable for offline sources (operator can still see what's in their NAS even when the NAS is down) with the staleness flag carrying the freshness contract. Sources with no cached listing return empty entries + `stale: true`."
+
+[[acceptance]]
+name = "library-browse-file-classical-metadata-fields-are-truth-or-null"
+detail = "Every BrowseEntry of kind `file` MUST project the 13 classical-music metadata fields (composer, composer_sort, conductor, ensemble, performer, work, work_sort, movement, movement_number, original_date, recording_date, label, medium) from the song's MPD tag set. Each field MUST serialise as JSON `null` when MPD's corresponding tag is absent or empty; empty strings or fabricated zeros are forbidden per the wire-shape-defaults-must-be-truth-or-null invariant (PLUGIN_CONTRACT.md §15). Directory and playlist BrowseEntry kinds do NOT carry classical metadata (they reference container objects, not tracks). The fields are populated by the same `MpdConnection`-level classical-tag parser the queue / favourites / playlist / now_playing surfaces consume so the projection cannot drift between shelves."
 
 # ----- Subjects -----
 

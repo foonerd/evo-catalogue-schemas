@@ -60,7 +60,14 @@ where each item is
 `{ position: u32, uri: string, source_id: string | null,
    title: string | null, artist: string | null,
    album: string | null, duration_ms: u64 | null,
-   available: bool | null }`.
+   available: bool | null,
+   composer: string | null, composer_sort: string | null,
+   conductor: string | null, ensemble: string | null,
+   performer: string | null, work: string | null,
+   work_sort: string | null, movement: string | null,
+   movement_number: u32 | null, original_date: string | null,
+   recording_date: string | null, label: string | null,
+   medium: string | null }`.
 
 `available` carries the per-item truth cascade — `true` /
 `false` when the truth is known (sticker explicit OR
@@ -181,6 +188,10 @@ detail = "Bulk operations (`add_to_playlist` with multi-URI payload, `remove_fro
 [[acceptance]]
 name = "playlist-index-counts-reflect-mpd-truth"
 detail = "Every `audio_playlist_index.playlists[].item_count` value emitted on the wire MUST reflect MPD's actual playlist file-line count when known, OR be JSON `null` when the count has not yet been determined. The literal value `0` MUST mean `zero items`; using `0` as a placeholder when the count is unknown is the banned `default-zero lie` pattern. The plugin populates counts on warm-start rehydration via MPD's `command_list_ok_begin` batched `listplaylist NAME` dispatch (O(1) round-trips for N playlists) and refreshes on every `stored_playlist` idle event. A contributor reintroducing the hardcoded `item_count: 0` default — or any equivalent fabricated-zero on an unknown — violates this invariant."
+
+[[acceptance]]
+name = "playlist-track-classical-metadata-fields-are-truth-or-null"
+detail = "Every `PlaylistItem` MUST project the 13 classical-music metadata fields (composer, composer_sort, conductor, ensemble, performer, work, work_sort, movement, movement_number, original_date, recording_date, label, medium) from the song's MPD tag set. Each field MUST serialise as JSON `null` when MPD's corresponding tag is absent or empty; empty strings or fabricated zeros are forbidden per the wire-shape-defaults-must-be-truth-or-null invariant (PLUGIN_CONTRACT.md §15). The fields are populated by the same `MpdConnection`-level classical-tag parser the queue / favourites / library / now_playing surfaces consume so the projection cannot drift between shelves."
 
 [[acceptance]]
 name = "playlist-item-available-cascade-emits-null-on-unknown"

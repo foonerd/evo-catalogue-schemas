@@ -329,10 +329,23 @@ Payload shape (v1):
     "v": 1,
     "transport_state": "playing" | "paused" | "stopped",
     "track": null | {
-      "title":   string | null,
-      "artist":  string | null,
-      "album":   string | null,
-      "mpd_path": string
+      "title":           string | null,
+      "artist":          string | null,
+      "album":           string | null,
+      "mpd_path":        string,
+      "composer":        string | null,
+      "composer_sort":   string | null,
+      "conductor":       string | null,
+      "ensemble":        string | null,
+      "performer":       string | null,
+      "work":            string | null,
+      "work_sort":       string | null,
+      "movement":        string | null,
+      "movement_number": u32 | null,
+      "original_date":   string | null,
+      "recording_date":  string | null,
+      "label":           string | null,
+      "medium":          string | null
     },
     "elapsed_ms":  u64 | null,
     "duration_ms": u64 | null,
@@ -504,6 +517,10 @@ detail = "The terminus honours a `get_spectrum_frame` read request_type that ret
 [[acceptance]]
 name = "disposition-emitted-on-autonomous-decisions"
 detail = "The playback warden emits a Disposition record to the `audio_playback_disposition` subject on every autonomous decision it makes on the operator's behalf — skip-traversal past an unreachable source / not-found file / decoder failure / permission denial, pause-on-mid-track-source-disconnect, queue-exhausted-no-playable. A Disposition is distinct from an Error (which is the response to an operator-issued verb) and from a Happening (a state change broadcast). Dispositions are durable + ring-buffered (last 32 entries persisted across plugin reload). Consecutive skips of the same kind from the same source MUST coalesce into a single `tracks_skipped_run` Disposition with `count + from_position + to_position`; per-item emission for runs is forbidden."
+
+[[acceptance]]
+name = "now-playing-track-classical-metadata-fields-are-truth-or-null"
+detail = "When the `now_playing` subject's `track` is non-null, the track record MUST project the 13 classical-music metadata fields (composer, composer_sort, conductor, ensemble, performer, work, work_sort, movement, movement_number, original_date, recording_date, label, medium) from the song's MPD tag set. Each field MUST serialise as JSON `null` when MPD's corresponding tag is absent or empty; empty strings or fabricated zeros are forbidden per the wire-shape-defaults-must-be-truth-or-null invariant (PLUGIN_CONTRACT.md §15). When `track` itself is null (stopped, no current song) the classical fields are not emitted (they live on the track record). The fields are populated by the same `MpdConnection`-level classical-tag parser the queue / favourites / playlist / library surfaces consume so the projection cannot drift between shelves."
 
 [[acceptance]]
 name = "disposition-shape-is-shelf-agnostic-shared-sdk-type"

@@ -49,7 +49,14 @@ item is
 `{ position: u32, uri: string, source_id: string | null,
    title: string | null, artist: string | null,
    album: string | null, duration_ms: u64 | null,
-   available: bool | null, added_at_ms: u64 | null }`.
+   available: bool | null, added_at_ms: u64 | null,
+   composer: string | null, composer_sort: string | null,
+   conductor: string | null, ensemble: string | null,
+   performer: string | null, work: string | null,
+   work_sort: string | null, movement: string | null,
+   movement_number: u32 | null, original_date: string | null,
+   recording_date: string | null, label: string | null,
+   medium: string | null }`.
 
 `available` carries the per-item truth cascade — `true` /
 `false` when the truth is known (sticker explicit OR
@@ -158,6 +165,10 @@ detail = "The plugin announces the `audio_favourites` subject (addressing `{ sch
 [[acceptance]]
 name = "favourites-is-favourite-membership-cheap"
 detail = "`favourites.is_favourite` MUST be O(1) membership-test (in-memory hash set keyed by URI). The plugin maintains an in-memory set mirrored from the persisted playlist; UI batched calls against the visible song list MUST NOT trigger per-call MPD round-trips. The mirror is refreshed on add / remove / clear / move + on the `audio_favourites` subject's announce; staleness against external MPD playlist edits (if any operator path bypasses the framework verbs) is bounded by the next `idle stored_playlist` wake cycle."
+
+[[acceptance]]
+name = "favourites-track-classical-metadata-fields-are-truth-or-null"
+detail = "Every `FavouriteItem` MUST project the 13 classical-music metadata fields (composer, composer_sort, conductor, ensemble, performer, work, work_sort, movement, movement_number, original_date, recording_date, label, medium) from the song's MPD tag set. Each field MUST serialise as JSON `null` when MPD's corresponding tag is absent or empty; empty strings or fabricated zeros are forbidden per the wire-shape-defaults-must-be-truth-or-null invariant (PLUGIN_CONTRACT.md §15). The fields are populated by the same `MpdConnection`-level classical-tag parser the queue / playlist / library / now_playing surfaces consume so the projection cannot drift between shelves."
 
 [[acceptance]]
 name = "favourites-item-available-cascade-emits-null-on-unknown"
