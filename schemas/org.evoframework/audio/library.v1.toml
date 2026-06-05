@@ -287,6 +287,101 @@ command; NAS sources also via MPD's search against the
 mounted path.
 """
 
+[[requests]]
+request_type = "library.list_works"
+description = """
+List every Work (musical composition) the library carries,
+grouped by MPD's `Work` tag. Payload is
+`{ v: 1, source_id: string | null, composer: string | null,
+   sort: string | null }`.
+
+`source_id` filters works to those whose contributing tracks
+resolve under that source; null matches every source.
+`composer` is a case-insensitive substring filter on the work's
+composer name; null matches every composer. `sort` is one of
+`"composer"` (default — composer then name ascending),
+`"name"` (work name ascending), or `"recording_count"`
+(recording count descending, ties broken by composer + name).
+
+Returns `{ v: 1, works: [WorkSummary...], total: u32 }`
+where each WorkSummary is `{ work_id: string, name: string,
+composer: string | null, recording_count: u32,
+sources: [string...] }`.
+
+`work_id` is a stable 16-hex-character identifier — the first
+16 hex chars of `SHA-256(normalised(composer) + 0x1F +
+normalised(work))` where `normalise(s)` lowercases and
+collapses whitespace runs. The unit separator (0x1F) between
+components prevents `"Bach" + "Cello"` from colliding with
+`"" + "BachCello"`. The identifier is deterministic across
+plugin restarts and device reboots so the operator-UI can
+cache work_id → display state without invalidation on every
+reboot.
+
+Grouping rule — conservative: tracks contribute to a Work
+entry ONLY when MPD's `Work` tag is populated. NO synthesis
+from `Composer + Title` when `Work` is absent. The
+acceptance row `library-works-grouped-only-by-explicit-mpd-work-tag`
+pins this; UI ships the matching rule.
+
+`recording_count` is the number of distinct
+`(album, conductor, original_date)` tuples among the
+contributing tracks. Same Work tag + same album + same
+conductor + same original_date = one recording; varying any
+of those three produces a distinct recording.
+
+Pre-scan cache state: the verb returns an empty `works` list
++ `total: 0` until the first `Database` / `Update` idle
+event has populated the works aggregate. The operator-UI
+gates the Works shelf on the library_state
+`distinct_works` counter being `Some(_)` rather than on the
+verb response — the counter being `null` is the "scan not
+yet run" signal.
+"""
+
+[[requests]]
+request_type = "library.get_work_recordings"
+description = """
+List the distinct recordings of one Work. Payload is
+`{ v: 1, work_id: string, source_id: string | null }`.
+
+`source_id` filters to recordings whose work appears under
+that source; null matches every source.
+
+Returns `{ v: 1, work_id: string, name: string,
+composer: string | null, recordings: [WorkRecording...] }`
+where each WorkRecording is `{ recording_id: string,
+conductor: string | null, ensemble: string | null,
+performer: string | null, original_date: string | null,
+recording_date: string | null, label: string | null,
+medium: string | null, album_uri: string,
+track_uris: [string...], total_duration_ms: u64 | null }`.
+
+`recording_id` is a stable 16-hex-character identifier —
+the first 16 hex chars of `SHA-256(normalised(album) +
+0x1F + normalised(conductor) + 0x1F +
+normalised(original_date))`. Null components (chamber music
+recordings without conductors, releases without original
+date) collapse to empty strings so the recordings still
+produce stable IDs.
+
+`album_uri` is the parent directory of the contributing
+tracks, used by UI to navigate to the album view.
+`track_uris` is the ordered list of MPD-relative track URIs
+comprising the recording (movements), ordered as MPD's
+`listallinfo` traversal returns them. `total_duration_ms`
+sums the contributing tracks' durations; `null` when no
+contributing track reported a duration.
+
+Refusal contract: when the works aggregate cache has not yet
+been computed (fresh plugin load, first MPD scan still in
+flight), the verb returns a structured Transient error
+(`work_aggregate_not_ready`); operator retries succeed after
+the next `Database` / `Update` idle event. When `work_id`
+does not match any work in the current aggregate, the verb
+returns a structured Permanent error (`unknown_work_id`).
+"""
+
 # ----- Acceptance rows -----
 
 [[acceptance]]
@@ -324,6 +419,18 @@ detail = "The plugin registers the local-internal source automatically at plugin
 [[acceptance]]
 name = "browse-library-returns-stale-cache-when-source-offline"
 detail = "`browse_library` against an Offline source returns the last cached browse-tree listing (when one exists) with `stale: true` + `source_state: { kind: 'offline', ... }`. Refusal on Offline source is forbidden — the UI's browse view stays operable for offline sources (operator can still see what's in their NAS even when the NAS is down) with the staleness flag carrying the freshness contract. Sources with no cached listing return empty entries + `stale: true`."
+
+[[acceptance]]
+name = "library-works-grouped-only-by-explicit-mpd-work-tag"
+detail = "`library.list_works` and `library.get_work_recordings` MUST group tracks into Work entries ONLY when MPD's explicit `Work` tag is populated. Synthesis from `Composer + Title` (e.g. stripping movement markers from a title to infer a Work) is forbidden — fabricating a Work where the operator has not tagged one would invent operator-meaningful state. Tracks without an MPD `Work` tag MUST NOT appear in any WorkSummary. The conservative path keeps the wire deterministic against minor MPD tag editing and lets the operator decide when a track participates in the Works shelf by setting the Work tag explicitly. The contributing tracks' MPD `Composer` tag becomes the WorkSummary's `composer` field; `composer` is `null` when the contributing tracks have no Composer tag (rare but possible — an operator may tag Work without Composer)."
+
+[[acceptance]]
+name = "library-works-identifiers-stable-across-restarts"
+detail = "`work_id` and `recording_id` MUST be deterministic across plugin restarts and device reboots. The reference implementation computes both via SHA-256 truncated to 16 hex chars over a normalised (lowercased + whitespace-collapsed) input with ASCII Unit Separator (0x1F) between components. `work_id` derives from `(composer, work)`; `recording_id` derives from `(album, conductor, original_date)`. None components in the recording identifier collapse to empty strings so chamber-music recordings without conductors still produce stable IDs. The 16-hex-char truncation provides 64 bits of entropy — collision-resistant within any personal music library. Operator-UI MAY cache `work_id` → display state without invalidation on every reboot; the cache stays valid as long as MPD's Composer + Work tags do not change on the contributing tracks."
+
+[[acceptance]]
+name = "library-state-classical-counters-are-truth-or-null"
+detail = "The three classical counters on `audio_library_state` (`total_tracks_with_composer`, `distinct_works`, `works_with_multiple_recordings`) MUST serialise as JSON `null` when the works aggregate scan has not yet completed (fresh plugin load, first MPD scan still in flight). When the scan has completed, each counter MUST carry the actual count as `Some(u32)`, which is 0 when the library has no classical content. The `0` and `null` semantics are distinct: `null` means `not yet known`; `0` means `known to be zero`. The operator-UI's Auto/On/Off resolution for the Works shelf gates on `works_with_multiple_recordings > 0` (Some-and-positive); the `null` state surfaces a `Scanning library...` indicator rather than `No classical content`. Per the wire-shape-defaults-must-be-truth-or-null invariant (PLUGIN_CONTRACT.md §15)."
 
 [[acceptance]]
 name = "library-browse-file-classical-metadata-fields-are-truth-or-null"
@@ -371,13 +478,29 @@ Payload shape (v1):
 
 ```
 {
-  "v":                       1,
-  "total_tracks":            u32,
-  "total_tracks_available":  u32,
-  "last_full_scan_at_ms":    u64 | null,
-  "active_scans":            [string...]   // source_ids with in-flight scans
+  "v":                              1,
+  "total_tracks":                   u32,
+  "total_tracks_available":         u32,
+  "last_full_scan_at_ms":           u64 | null,
+  "active_scans":                   [string...],  // source_ids with in-flight scans
+  "total_tracks_with_composer":     u32 | null,
+  "distinct_works":                 u32 | null,
+  "works_with_multiple_recordings": u32 | null
 }
 ```
+
+The three classical counters (`total_tracks_with_composer`,
+`distinct_works`, `works_with_multiple_recordings`) carry the
+truth-or-null cascade — `null` means the works aggregate scan
+has not yet completed (fresh plugin load, first MPD scan still
+in flight); `Some(value)` is the actual count, which is 0 when
+the library has no classical content. The operator-UI gates the
+Works shelf and the enriched-metadata strip on these counters
+being `Some(_)` so the Auto resolution sees "scan not run yet"
+distinctly from "no classical content". The
+`works_with_multiple_recordings > 0` predicate is the
+operator-meaningful classical-library indicator that drives the
+Auto/On/Off resolution for the Works shelf.
 
 Consumers (operator UI's library overview panel) read this
 once on connect via a future `library.get_state` read verb
