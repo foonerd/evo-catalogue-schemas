@@ -233,6 +233,10 @@ detail = "`queue.get_queue` is read-only (no queue mutation) and is the sanction
 name = "queue-skip-to-next-available-emits-disposition"
 detail = "`queue.skip_to_next_available` MUST emit one or more disposition records to the `audio_playback_disposition` subject (see audio.playback.v1). The dispositions document the autonomous skip decisions made on the operator's behalf and carry the recovery hints the UI consumes. Per-item dispositions for runs of consecutive same-kind same-source skips MUST coalesce into a single `TracksSkippedRun` disposition with `count + from_position + to_position` — per-item emission for runs is forbidden."
 
+[[acceptance]]
+name = "queue-item-carries-artwork-url"
+detail = "Every QueueItem in the `audio_queue` envelope's `items` array MUST carry an `artwork_url` field of shape `/api/v1/audio/artwork?scheme=mpd-path&value=<url-encoded uri>`. The URL is target-addressed; UI consumers append `&size=...` per their render target. Percent-encoding follows RFC 3986 unreserved-set rules. See `audio.playback.v1` acceptance row `now-playing-track-carries-artwork-url` for the full cascade contract."
+
 # Subjects the plugin announces. Consumers (operator UI's
 # Queue panel) resolve the addressing below against the
 # framework's subject querier and subscribe via
@@ -272,7 +276,8 @@ Where each QueueItem is:
   "artist":       string | null,
   "album":        string | null,
   "duration_ms":  u64 | null,
-  "available":    bool            // derived from evo:available sticker + source state
+  "available":    bool,           // derived from evo:available sticker + source state
+  "artwork_url":  string          // /api/v1/audio/artwork?scheme=mpd-path&value=<url-encoded uri>
 }
 ```
 

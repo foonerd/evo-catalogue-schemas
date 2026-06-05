@@ -237,6 +237,7 @@ Each entry is one of:
   "title": string | null, "artist": string | null,
   "album": string | null, "duration_ms": u64 | null,
   "available": bool,
+  "artwork_url": string,
   "composer": string | null, "composer_sort": string | null,
   "conductor": string | null, "ensemble": string | null,
   "performer": string | null, "work": string | null,
@@ -435,6 +436,10 @@ detail = "The three classical counters on `audio_library_state` (`total_tracks_w
 [[acceptance]]
 name = "library-browse-file-classical-metadata-fields-are-truth-or-null"
 detail = "Every BrowseEntry of kind `file` MUST project the 13 classical-music metadata fields (composer, composer_sort, conductor, ensemble, performer, work, work_sort, movement, movement_number, original_date, recording_date, label, medium) from the song's MPD tag set. Each field MUST serialise as JSON `null` when MPD's corresponding tag is absent or empty; empty strings or fabricated zeros are forbidden per the wire-shape-defaults-must-be-truth-or-null invariant (PLUGIN_CONTRACT.md §15). Directory and playlist BrowseEntry kinds do NOT carry classical metadata (they reference container objects, not tracks). The fields are populated by the same `MpdConnection`-level classical-tag parser the queue / favourites / playlist / now_playing surfaces consume so the projection cannot drift between shelves."
+
+[[acceptance]]
+name = "library-browse-file-carries-artwork-url"
+detail = "Every BrowseEntry of kind `file` MUST carry an `artwork_url` field of shape `/api/v1/audio/artwork?scheme=mpd-path&value=<url-encoded uri>`. Directory and playlist BrowseEntry kinds do NOT carry artwork_url (the operator UI's directory / playlist tiles render via different artwork-resolution surfaces — directory artwork resolves to the first track's cover; playlist tiles render generic icons). The URL is target-addressed; UI consumers append `&size=...` per their render target. Percent-encoding follows RFC 3986 unreserved-set rules. See `audio.playback.v1` acceptance row `now-playing-track-carries-artwork-url` for the full cascade contract."
 
 # ----- Subjects -----
 

@@ -174,6 +174,10 @@ detail = "Every `FavouriteItem` MUST project the 13 classical-music metadata fie
 name = "favourites-item-available-cascade-emits-null-on-unknown"
 detail = "When the per-item availability truth has not yet been determined — the song's resolved source is in `Probing` state and no `evo:available` sticker exists, OR the song does not resolve to any registered source — `FavouriteItem.available` MUST serialise as JSON `null` (mapped from `Option::None` in the implementation). The literal `false` MUST mean KNOWN unreachable (sticker explicit `0` OR source `Offline` / `Retired`); using `false` as a placeholder when the truth is unknown is the banned `default-falsy lie` pattern. The cascade is the shared `crate::availability::compute_item_available` primitive — audio.queue.v1 + audio.playlist.v1 + audio.favourites.v1 all consume the same cascade so the per-item projection cannot drift between shelves."
 
+[[acceptance]]
+name = "favourites-item-carries-artwork-url"
+detail = "Every FavouriteItem in the `audio_favourites` envelope's `items` array MUST carry an `artwork_url` field of shape `/api/v1/audio/artwork?scheme=mpd-path&value=<url-encoded uri>`. The URL is target-addressed; UI consumers append `&size=...` per their render target. Percent-encoding follows RFC 3986 unreserved-set rules. See `audio.playback.v1` acceptance row `now-playing-track-carries-artwork-url` for the full cascade contract."
+
 [[subjects]]
 addressing = { scheme = "evo.audio.favourites", value = "set" }
 subject_type = "audio_favourites"
@@ -206,7 +210,8 @@ Where each FavouriteItem is:
   "album":        string | null,
   "duration_ms":  u64 | null,
   "available":    bool | null,
-  "added_at_ms":  u64 | null
+  "added_at_ms":  u64 | null,
+  "artwork_url":  string  // /api/v1/audio/artwork?scheme=mpd-path&value=<url-encoded uri>
 }
 ```
 

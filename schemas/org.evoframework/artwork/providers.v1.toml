@@ -26,27 +26,96 @@ admitted set.
 [[requests]]
 request_type = "artwork.resolve"
 description = """
-Resolve artwork for the supplied media identifier. Returns a
-provider-specific representation (URI for remote fetch, inline
-blob for local files, or a structured not-found if the provider
-cannot resolve). Reference plugin:
-`org.evoframework.artwork.local`.
+Resolve artwork for the supplied media target, optionally at a
+specific size variant. Returns a structured response carrying
+a stable `content_hash` (when bytes were resolved + cached) and
+the source mime / size.
+
+Request payload (v1):
+
+```json
+{
+  "v": 1,
+  "target": { "scheme": "mpd-path", "value": "<external-addressing value>" },
+  "size": "tiny" | "medium" | "large" | "original"
+}
+```
+
+`target.scheme` mirrors the external-addressing scheme strings
+published by the playback warden (`mpd-path` for a file URI,
+`mpd-album` for the compound `"{artist}|{album}"` shape).
+`target.value` is the scheme-specific opaque value.
+
+`size` is optional; defaults to `"original"` when absent. The
+taxonomy matches the operator-UI's render targets at 2x retina
+density:
+
+- `tiny` — 128 px bounding box (sidebar thumbnails)
+- `medium` — 300 px bounding box (queue rows / library tiles)
+- `large` — 600 px bounding box (now-playing card)
+- `original` — no resize (album-art view, multi-room
+  propagation, archival)
+
+Response payload (v1):
+
+```json
+{
+  "v": 1,
+  "status": "ok" | "not_found" | "bad_request",
+  "path": "<absolute path>" | null,
+  "content_hash": "<SHA-256 hex>" | null,
+  "mime": "image/jpeg" | "image/png" | "image/webp" | null,
+  "size": "tiny" | "medium" | "large" | "original" | null,
+  "detail": "<operator-readable detail>" | null
+}
+```
+
+On `status = "ok"`:
+- `content_hash` is the SHA-256 (lowercase 64-hex) of the
+  resolved variant's bytes, matching the framework's
+  `/api/v1/audio/artwork/:content_hash` endpoint address shape.
+- `mime` is `image/webp` for resized variants (per the
+  reference plugin's transcoding posture) or the source MIME
+  for `original`.
+- `size` round-trips with the request's `size` parameter.
+- `path` is retained for in-process callers that prefer the
+  cover file path to the cache-hosted bytes.
+
+On `status = "not_found"` / `bad_request`:
+- `path` and `content_hash` are null; `detail` carries the
+  operator-readable reason.
+
+Reference plugin: `org.evoframework.artwork.local`.
 """
-payload_in = "tbd-review"
-payload_out = "tbd-review"
 
 [[acceptance]]
 name = "resolve-deterministic-per-input"
-detail = "resolve(id) returns the same artwork representation across calls within the plugin's cache window."
+detail = "resolve(target, size) returns the same artwork content_hash across calls within the plugin's cache window. Identical (target, size) inputs MUST produce identical content_hash outputs."
 
 [[acceptance]]
 name = "resolve-not-found-is-structured"
-detail = "When the provider cannot resolve, returns a structured not-found response, not an error. Caller composes fallback across providers."
+detail = "When the provider cannot resolve, returns a structured not-found response with status=\"not_found\" + a populated detail field, not an error. Caller composes fallback across providers."
 
 [[acceptance]]
 name = "resolve-no-network-unless-declared"
 detail = "Plugin must not perform outbound network fetches unless its manifest declares `prerequisites.outbound_network = true` (per BOUNDARY discipline)."
 
-# NOTE: payload_in / payload_out are marked `tbd-review` pending
-# plugin-author review against `org.evoframework.artwork.local`'s
-# wire contract.
+[[acceptance]]
+name = "resolve-size-variants-are-distinct"
+detail = "Each size variant (tiny / medium / large / original) for the same target MUST produce a distinct content_hash. Multi-room receivers fetching by hash MUST receive exactly the variant the leader produced for that size; a leader rendering medium thumbnails followed by a receiver fetching the same hash MUST get the medium-resized bytes, not the original master."
+
+[[acceptance]]
+name = "resolve-populates-asset-cache"
+detail = "When status=\"ok\" and the framework wired LoadContext.asset_cache, the plugin MUST push the resolved bytes into the cache under the returned content_hash before responding. The framework's `/api/v1/audio/artwork/:content_hash` endpoint serves whatever lands here; absent cache writes the endpoint returns 404 and consumers fall back per the universal artwork-first-or-icon rule."
+
+[[acceptance]]
+name = "resolve-size-unknown-is-bad-request"
+detail = "Unknown size values surface as status=\"bad_request\" with a structured detail naming the legal taxonomy. The plugin MUST NOT silently coerce to original — the operator UI sees a recognisable refusal."
+
+[[acceptance]]
+name = "resolve-aspect-ratio-preserved-on-resize"
+detail = "Resized variants preserve aspect ratio. The size taxonomy is interpreted as a bounding box — the output's longer edge equals the target px, the shorter edge scales proportionally. Forced square crop is forbidden — operator-UI rendering layers (CSS object-fit) handle visual centering."
+
+[[acceptance]]
+name = "resolve-no-upscale-on-small-sources"
+detail = "Source images smaller than the target bounding box are passed through verbatim — no upscale. Upscaling adds softness without adding information; the operator gets the master fidelity instead."

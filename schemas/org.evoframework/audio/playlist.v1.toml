@@ -61,6 +61,7 @@ where each item is
    title: string | null, artist: string | null,
    album: string | null, duration_ms: u64 | null,
    available: bool | null,
+   artwork_url: string,
    composer: string | null, composer_sort: string | null,
    conductor: string | null, ensemble: string | null,
    performer: string | null, work: string | null,
@@ -200,6 +201,10 @@ detail = "When the per-item availability truth has not yet been determined — t
 [[acceptance]]
 name = "wire-shape-defaults-must-be-truth-or-null"
 detail = "Generalisation of the count-truth invariant across this shelf: every wire-shape field whose semantic value is `not yet known` MUST serialise as JSON `null` (mapped from `Option::None` in the implementation), not as a typed zero / empty-string / empty-array placeholder. The pattern `set the field to 0 / empty so the consumer sees a well-formed payload` is forbidden because it makes the consumer unable to distinguish `known to be zero` from `not known yet`. Future fields added to this shelf MUST honour the same invariant; the audio.favourites.v1 / audio.library.v1 / audio.queue.v1 contracts apply the same rule."
+
+[[acceptance]]
+name = "playlist-item-carries-artwork-url"
+detail = "Every PlaylistItem in the playlist contents envelope MUST carry an `artwork_url` field of shape `/api/v1/audio/artwork?scheme=mpd-path&value=<url-encoded uri>`. The URL is target-addressed; UI consumers append `&size=...` per their render target. Percent-encoding follows RFC 3986 unreserved-set rules. See `audio.playback.v1` acceptance row `now-playing-track-carries-artwork-url` for the full cascade contract."
 
 [[subjects]]
 addressing = { scheme = "evo.audio.playlist", value = "index" }

@@ -333,6 +333,7 @@ Payload shape (v1):
       "artist":          string | null,
       "album":           string | null,
       "mpd_path":        string,
+      "artwork_url":     string,
       "composer":        string | null,
       "composer_sort":   string | null,
       "conductor":       string | null,
@@ -525,6 +526,10 @@ detail = "When the `now_playing` subject's `track` is non-null, the track record
 [[acceptance]]
 name = "disposition-shape-is-shelf-agnostic-shared-sdk-type"
 detail = "The Disposition wire-payload shape is a shared SDK type (`evo_plugin_sdk::contract::disposition::Disposition`) so cross-cutting subsystems (multiroom leader-change, source-routing fallback, trust-chain anomaly) emit dispositions on their own happening streams using the same wire shape. The shape: `{ v: u32, at_ms: u64, kind: DispositionKind, queue_position: u32 | null, track_uri: string | null, source_id: string | null, source_state_at_decision: SourceState | null, action_taken: DispositionAction, recovery_hint: RecoveryHint | null, runs: { count: u32, from_position: u32, to_position: u32 } | null }`. DispositionKind / DispositionAction / RecoveryHint are tagged-kind enums; future variants ride at v=1 with `#[serde(other)]` fallback for unknown kinds."
+
+[[acceptance]]
+name = "now-playing-track-carries-artwork-url"
+detail = "The `audio_playback_now_playing` envelope's `track` object MUST carry an `artwork_url` field of shape `/api/v1/audio/artwork?scheme=<scheme>&value=<url-encoded value>` when track is non-null. The URL is target-addressed (not content-hash-addressed) — operator-side MPD tag edits propagate without invalidating UI caches. UI consumers append `&size={tiny|medium|large|original}` to request the variant matching their render target. The framework's resolve endpoint dispatches via the artwork-providers shelf and 302-redirects to the canonical content-hash endpoint for the resolved bytes. The query value MUST be percent-encoded per RFC 3986 (unreserved set: alphanumerics + `-`, `_`, `.`, `~`); raw spaces, `&`, `=`, `?`, `#`, and Unicode bytes MUST surface as `%XX` so query parsing remains correct against MPD paths carrying special characters."
 
 [[subjects]]
 addressing = { scheme = "evo.audio.playback", value = "disposition" }
