@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Just a Nerd
+
 # Schema for the `audio.library` shelf at shape version 1.
 #
 # Library shelves host the operator-facing music library

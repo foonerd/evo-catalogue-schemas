@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Just a Nerd
+
 # Schema for the `audio.composition` shelf at shape version 1.
 #
 # Composition plugins compute target audio pipeline graphs from

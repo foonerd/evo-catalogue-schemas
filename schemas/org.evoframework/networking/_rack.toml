@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Just a Nerd
+
 # Rack-level metadata for the `networking` rack.
 #
 # The networking rack hosts brand-neutral framework-tier shelves
