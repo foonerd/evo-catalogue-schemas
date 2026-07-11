@@ -72,7 +72,9 @@ shipping:
 
 ```sh
 # Clone (or check out a pinned tag) into a known location.
-git clone -b v0.1.0 https://github.com/foonerd/evo-catalogue-schemas /path/to/schemas
+git clone https://github.com/foonerd/evo-catalogue-schemas /path/to/schemas
+# Or check out a pinned tag matching the framework release you build against:
+# git -C /path/to/schemas checkout <tag>
 
 # Validate your plugin against the schemas (evo-plugin-tool from a recent evo-core release).
 evo-plugin-tool validate-shelf-schema \
