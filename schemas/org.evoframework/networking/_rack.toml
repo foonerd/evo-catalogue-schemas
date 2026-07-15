@@ -25,3 +25,7 @@ the framework admits one link-control plugin per device.
 [[shelves]]
 name = "link"
 current_shape = 1
+
+[[shelves]]
+name = "shares"
+current_shape = 1

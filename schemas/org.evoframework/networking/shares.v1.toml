@@ -1,0 +1,616 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Just a Nerd
+
+# Schema for the `networking.shares` shelf at shape version 1.
+#
+# Framework-tier substrate for operator-facing NAS / SMB / NFS
+# music-source management + basic SMB file-server (evo as an
+# upload target). The invariant: an operator can point evo at
+# music wherever the music lives (local disk, NAS over SMB,
+# NAS over NFS, or files uploaded directly to the device)
+# without ever editing a shell file by hand.
+#
+# The shelf declares four surfaces:
+#
+# - Share management: add / edit / remove / mount / unmount
+#   configured shares with SMB dialect probe + persistence + NFS
+#   kernel version negotiation + network-up gating.
+# - Share discovery: mDNS + smbclient LAN sweep with per-host
+#   negotiated-dialect parsing; reactive subject for the
+#   operator UI.
+# - Server-side SMB: evo-as-SMB-server configuration (enabled,
+#   min_protocol, extra_shares, smb_users) with domain-identity-
+#   linked user management.
+# - Per-share reactive state: mount status, negotiated protocol
+#   version, recent-event ring-buffer per share, one subject
+#   instance per share_id.
+#
+# Reference plugin: no vendor implementation ships today — the
+# runtime primitives (NetworkSharesRuntime + SambaServerRuntime)
+# live in the framework runtime, not in a discrete plugin. The
+# shelf declares the wire contract UI consumers subscribe to;
+# the runtime primitives land in immediately-following commits.
+
+schema_version = 1
+rack = "networking"
+shelf = "shares"
+shape = 1
+
+description = """
+Framework-tier NAS / SMB / NFS share-management shelf plus
+basic SMB file-server (evo-as-upload-target). Operator gestures
+add / edit / remove / mount / unmount shares over any of three
+protocols (CIFS/SMB, NFS); the framework probes SMB dialect,
+persists the working version, mounts on boot after L3
+reachability, remounts on network transitions, and surfaces
+per-share state on reactive subjects. Server-side SMB shares
+the evo device as an upload target with domain-identity-linked
+user management. All operator gestures step-up-gated;
+audit-ledger emission per gesture.
+"""
+
+# ---------------------------------------------------------------
+# Verbs — operator gestures
+# ---------------------------------------------------------------
+#
+# Every verb `plugins_admin` capability-gated with step-up auth
+# per the framework's existing operator-gesture discipline. The
+# plugin (framework runtime) never re-checks the principal — the
+# framework dispatcher is the authoritative gate.
+
+# --- Share management ---
+
+[[requests]]
+request_type = "network.share.add"
+description = """
+Add a new share record and attempt initial mount. Persists the
+record to the framework state, runs SMB dialect probe on CIFS
+shares (or defers to NFS kernel negotiation), and publishes the
+resulting share state on the per-share subject. Returns the
+minted share_id + initial mount outcome. Idempotent — adding a
+share with a duplicate alias returns Invalid; the operator
+edits or removes the prior record first.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "network.share.edit"
+description = """
+Modify an existing share record. Any field except share_id may
+be edited (alias, host, path, credentials, advanced_options).
+Editing does not implicitly remount — the operator explicitly
+dispatches network.share.mount after. Republishes the per-share
+subject with the new record fields.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "network.share.remove"
+description = """
+Unmount (lazy detach for busy CIFS shares via umount -l) and
+delete the share record. Emits a final per-share state
+transition (Mounted → Unmounted → Removed) so subscribers can
+retire their UI slot cleanly.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "network.share.mount"
+description = """
+Mount an existing share. On CIFS, runs the dialect probe ladder
+(2.0 → 3.1.1) lowest-first unless the operator's
+advanced_options carries an explicit vers= (in which case a
+single attempt with the operator's choice). On success,
+persists the working dialect to the share record's
+persisted_vers so subsequent boots are single-attempt. On NFS,
+single mount attempt with kernel negotiation (v4 → v3
+fallback). Republishes the per-share subject with the mount
+outcome.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "network.share.unmount"
+description = """
+Unmount a mounted share. CIFS busy mounts use lazy detach
+(umount -l); the mount table clears when the last file handle
+closes. Republishes the per-share subject with the unmount
+outcome.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+# --- Discovery ---
+
+[[requests]]
+request_type = "network.discovery.refresh"
+description = """
+Trigger immediate mDNS-SD + per-host smbclient discovery sweep.
+Refreshes the `system_network_shares_discovered` subject with
+the new NAS inventory. Bounded by an 18-second overall budget
+(mDNS timeout) + 15-second per-host budget (smbclient). Read-
+side; capability-gated (any authenticated operator may run
+discovery — enumerates only reachable devices, no shared state
+mutation).
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+# --- Server-side SMB ---
+
+[[requests]]
+request_type = "network.smb_server.apply"
+description = """
+Apply new SMB-server settings (enabled toggle, min_protocol
+selector, extra_shares list, smb_users list). Renders the
+updated smb.conf, syncs SMB users against domain identities,
+validates the config with testparm, and restarts smbd on
+success. Returns an apply-report enumerating settings that
+took effect vs settings the plugin refused (e.g. path outside
+allowlist).
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "network.smb_server.user_add"
+description = """
+Add a new SMB user backed by a password stored in the evo
+credential vault. Password never travels on this verb — the
+operator dispatches through the framework's user-interaction
+prompt for the password entry; this verb receives an
+opaque SecretRef the vault issued. Mapped optionally to a
+domain identity for trust-ledger integration.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "network.smb_server.user_revoke"
+description = """
+Revoke an existing SMB user. Removes from smbpasswd + retracts
+the vault SecretRef. Existing sessions terminate on the next
+smbd cycle.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+# ---------------------------------------------------------------
+# Subjects — reactive read-side surface for UI consumers
+# ---------------------------------------------------------------
+
+# `system_network_shares_configured` — singleton subject
+# carrying the full list of configured shares (records only, no
+# per-share state). UI consumers subscribe to render the
+# configured-shares list widget; per-share state comes from the
+# per-share subject below.
+
+[[subjects]]
+name = "system_network_shares_configured"
+description = "Singleton subject carrying the full list of configured shares on this node. Republished on every add / edit / remove verb. Per-share runtime state (mounted / unmounted / mounting / failed + reason + negotiated version) lives on the per-share subject rather than here — this subject is the operator-authored record set."
+
+[[subjects.fields]]
+name = "shares"
+type = "array<share_record>"
+description = "Every share record configured on this node. Empty when the operator has configured no shares. Ordered by created_at_ms ascending (oldest-first) so operator surfaces render the shares in a stable order."
+
+[[subjects.fields]]
+name = "last_update_at"
+type = "system_time"
+description = "Wall-clock timestamp of the last envelope refresh."
+
+# `system_network_shares_discovered` — singleton subject
+# carrying the LAN discovery inventory. Refreshed on operator-
+# triggered discovery + a 5-minute background cadence.
+
+[[subjects]]
+name = "system_network_shares_discovered"
+description = "Singleton subject carrying the most recent LAN-discovered NAS inventory. Refreshed on network.discovery.refresh + on a 5-minute background cadence. The discovered list is not authoritative — items disappear when the NAS goes off-network without an explicit removal happening."
+
+[[subjects.fields]]
+name = "devices"
+type = "array<discovered_nas>"
+description = "Every discovered NAS device on the local LAN. Empty when no NAS is reachable via mDNS. Ordered by name ascending."
+
+[[subjects.fields]]
+name = "discovery_source"
+type = "string"
+description = "Which discovery mechanism produced this snapshot (mdns_avahi / manual / cache-only). Widgets rendering the discovered-devices list use this for a `Discovered via <source>` hint."
+
+[[subjects.fields]]
+name = "last_discovery_at"
+type = "system_time"
+description = "Wall-clock timestamp of the last discovery sweep completion."
+
+# `network_share_state` — per-share subject; one instance per
+# share_id. Consumers rendering per-share status cards subscribe
+# to the type and receive updates for every share instance.
+
+[[subjects]]
+name = "network_share_state"
+description = "Per-share subject carrying mount status + negotiated protocol version + operator-actionable failure reason. One instance per configured share (keyed by share_id). Republished on every state transition (mount attempted / mounted / unmount attempted / unmounted / mount failed / connectivity dropped)."
+
+[[subjects.fields]]
+name = "share_id"
+type = "string"
+description = "Canonical id of the share this state envelope represents. Subject-instance key; matches the share_id field on the corresponding share_record entry."
+
+[[subjects.fields]]
+name = "alias"
+type = "string"
+description = "Operator-visible alias for the share (denormalised from the share record so the UI does not need a second subject query to render a status card)."
+
+[[subjects.fields]]
+name = "state"
+type = "share_state"
+description = "Current mount state — one of Mounted / Unmounted / Mounting / Failed. Widgets rendering the per-share status card map this to a colour + icon per the universal state-to-visual mapping."
+
+[[subjects.fields]]
+name = "reason"
+type = "option<string>"
+description = "Human-readable reason for the current state when non-obvious (mount failed reason, connectivity-down explanation). Absent when the state itself is enough (Mounted needs no reason). Widgets render as the second line of the status card."
+
+[[subjects.fields]]
+name = "negotiated_version"
+type = "option<string>"
+description = "Actual protocol version reached on the wire (CIFS: `2.1` / `3.0` / `3.02` / `3.1.1`; NFS: `4.2` / `4.1` / `4.0` / `3`). Absent when unmounted or when the initial mount has not yet been attempted. Widgets render as a compact chip on the status card."
+
+[[subjects.fields]]
+name = "mount_root"
+type = "string"
+description = "Filesystem path the share is (or would be) mounted at. Widgets render as a copyable code chip for the operator to reference from a terminal if needed."
+
+[[subjects.fields]]
+name = "last_mounted_at"
+type = "option<system_time>"
+description = "Wall-clock timestamp of the last successful mount. Absent when the share has never mounted successfully."
+
+[[subjects.fields]]
+name = "last_update_at"
+type = "system_time"
+description = "Wall-clock timestamp of the last state transition."
+
+# `network_share_events` — per-share bounded-ring-buffer subject
+# carrying recent lifecycle events. Consumers rendering the
+# per-share status panel's activity log subscribe.
+
+[[subjects]]
+name = "network_share_events"
+description = "Per-share bounded ring-buffer subject carrying the N most recent lifecycle events (mount, unmount, error, connectivity transition). One instance per configured share (keyed by share_id). Ring buffer is operator-configurable; default 32 entries."
+
+[[subjects.fields]]
+name = "share_id"
+type = "string"
+description = "Canonical id of the share this event log represents."
+
+[[subjects.fields]]
+name = "events"
+type = "array<share_event>"
+description = "Recent lifecycle events for this share, ordered newest-first. Bounded ring buffer; oldest entries drop as new ones arrive."
+
+[[subjects.fields]]
+name = "ring_size"
+type = "u32"
+description = "Configured ring buffer capacity. Consumers rendering the activity log show a `showing <n> of ring_size` hint when appropriate."
+
+# `system_smb_server` — singleton subject for evo-as-SMB-server
+# state.
+
+[[subjects]]
+name = "system_smb_server"
+description = "Singleton subject carrying the evo-as-SMB-server enabled state, min-protocol selection, active extra-shares list, and active smb-users list. Republished on every network.smb_server.apply. Widgets rendering the SMB-server settings form subscribe to seed the form + reflect apply outcomes."
+
+[[subjects.fields]]
+name = "enabled"
+type = "boolean"
+description = "Whether smbd is currently enabled + running on this node."
+
+[[subjects.fields]]
+name = "min_protocol"
+type = "string"
+description = "Active `server min protocol` value (`default` / `SMB2_02` / `SMB3_02`). Unknown values normalise to `default`."
+
+[[subjects.fields]]
+name = "extra_shares"
+type = "array<extra_share>"
+description = "Operator-defined extra shares beyond the framework's shipped defaults (typically the music library root + upload target). Each entry names a path + operator-visible name + guest-access flag."
+
+[[subjects.fields]]
+name = "smb_users"
+type = "array<smb_user_record>"
+description = "Configured SMB users. Passwords never in this envelope — the vault SecretRef is not surfaced on the wire."
+
+[[subjects.fields]]
+name = "last_apply_at"
+type = "option<system_time>"
+description = "Wall-clock timestamp of the last successful apply. Absent when no apply has succeeded since boot."
+
+# ---------------------------------------------------------------
+# Records
+# ---------------------------------------------------------------
+
+# Share record — the operator-authored configuration for one
+# network share. Mirrors volumio-evo's ShareRecord shape with
+# evo's credential-vault + persisted-dialect extensions.
+
+[[subjects.record_types.share_record]]
+name = "share_id"
+type = "string"
+description = "Stable UUIDv4 id minted at add-share time. Survives rename (alias change does not mint a new id)."
+
+[[subjects.record_types.share_record]]
+name = "alias"
+type = "string"
+description = "Operator-set human-readable alias (e.g. `Family NAS`, `Basement Rack`). Used to render the share in operator surfaces. Must be unique within a node — adding a duplicate returns Invalid."
+
+[[subjects.record_types.share_record]]
+name = "fstype"
+type = "fstype"
+description = "Filesystem type — `cifs` (SMB/CIFS) or `nfs`. Governs mount syntax + dialect handling."
+
+[[subjects.record_types.share_record]]
+name = "host"
+type = "string"
+description = "Server host — IP address (`192.168.x.y`) or DNS name (`nas.local`). No protocol prefix; the fstype implies the protocol."
+
+[[subjects.record_types.share_record]]
+name = "path"
+type = "string"
+description = "Share path on the host (CIFS: `Music` for `//nas/Music`; NFS: `/export/music`). Leading slash convention differs by fstype; the plugin normalises."
+
+[[subjects.record_types.share_record]]
+name = "credentials"
+type = "credentials"
+description = "Authentication mode + typed credential reference. Passwords NEVER stored in the share record — they live in the evo credential vault; the record carries only the opaque SecretRef the vault issued."
+
+[[subjects.record_types.share_record]]
+name = "advanced_options"
+type = "string"
+description = "Operator-supplied mount.cifs / mount.nfs options string (e.g. `rw,uid=1000,gid=1000` for CIFS, `soft,noauto,timeo=30` for NFS). Empty when the operator has not customised. If it contains `vers=<X>`, the operator's choice overrides the framework's probe."
+
+[[subjects.record_types.share_record]]
+name = "persisted_vers"
+type = "option<string>"
+description = "The working SMB dialect the framework's probe found on a prior successful mount (e.g. `3.1.1`). Absent for NFS or when the share has never mounted successfully. Subsequent mounts skip the probe when this field is present. Cleared automatically on mount failure to re-run the probe."
+
+[[subjects.record_types.share_record]]
+name = "mount_root"
+type = "string"
+description = "Filesystem path where this share mounts. Framework-computed as `/mnt/NAS/<sanitised alias>` — sanitisation strips shell-hostile characters."
+
+[[subjects.record_types.share_record]]
+name = "created_at_ms"
+type = "i64"
+description = "Wall-clock milliseconds at share record creation. Used for stable operator-surface ordering."
+
+[[subjects.record_types.share_record]]
+name = "last_mounted_at_ms"
+type = "option<i64>"
+description = "Wall-clock milliseconds at the last successful mount. Absent when the share has never mounted successfully."
+
+# Credentials tagged variant. `guest` requires no fields;
+# `user_password` carries the username + a SecretRef pointing
+# at the vault entry; `key_file` (NFS-style, reserved for
+# v0.1.14 extension) carries a filesystem path.
+
+[[subjects.record_types.credentials]]
+name = "kind"
+type = "string"
+description = "Credential kind: `guest`, `user_password`, or `key_file`."
+
+[[subjects.record_types.credentials]]
+name = "username"
+type = "option<string>"
+description = "Set when kind = `user_password`. The remote-server user account name."
+
+[[subjects.record_types.credentials]]
+name = "secret_ref"
+type = "option<string>"
+description = "Set when kind = `user_password`. Opaque reference into the evo credential vault; the actual password is never on the wire."
+
+[[subjects.record_types.credentials]]
+name = "key_file_path"
+type = "option<string>"
+description = "Set when kind = `key_file`. Filesystem path to the key material (v0.1.14 reserved; no runtime support today)."
+
+# Discovered NAS — one entry in the discovery inventory.
+
+[[subjects.record_types.discovered_nas]]
+name = "name"
+type = "string"
+description = "NetBIOS / mDNS name for the discovered device."
+
+[[subjects.record_types.discovered_nas]]
+name = "ip"
+type = "string"
+description = "IPv4 address (or IPv6 when the mDNS entry surfaces one) the discovery probe reached."
+
+[[subjects.record_types.discovered_nas]]
+name = "negotiated_dialect"
+type = "option<string>"
+description = "SMB dialect the discovery probe negotiated when enumerating shares (`smbclient -m SMB3_11`). Present when the probe reached the server; absent when the server refused enumeration. Widgets use this as a compatibility hint for the operator when picking a share to add."
+
+[[subjects.record_types.discovered_nas]]
+name = "shares"
+type = "array<discovered_share>"
+description = "Every share the discovery probe found on this device. Empty when the server refused enumeration or exposed no shares."
+
+[[subjects.record_types.discovered_share]]
+name = "name"
+type = "string"
+description = "Share name as the server reports it (e.g. `Music`, `Backups`, `Public`)."
+
+[[subjects.record_types.discovered_share]]
+name = "path"
+type = "string"
+description = "Share path as the server reports it. Widgets can pre-fill the add-share form with `host` + this `path`."
+
+# Per-share lifecycle event — one entry in the events ring
+# buffer.
+
+[[subjects.record_types.share_event]]
+name = "at"
+type = "system_time"
+description = "Wall-clock timestamp of the event."
+
+[[subjects.record_types.share_event]]
+name = "kind"
+type = "string"
+description = "Event class: `mount_attempted`, `mounted`, `mount_failed`, `unmount_attempted`, `unmounted`, `connectivity_dropped`, `connectivity_restored`."
+
+[[subjects.record_types.share_event]]
+name = "detail"
+type = "option<string>"
+description = "Human-readable detail (mount failure reason, negotiated version on success, connectivity carrier)."
+
+# Extra share (server-side SMB) — one operator-defined share
+# beyond the framework defaults.
+
+[[subjects.record_types.extra_share]]
+name = "name"
+type = "string"
+description = "SMB-visible name of the share (renders as `//<hostname>/<name>` on client browsers)."
+
+[[subjects.record_types.extra_share]]
+name = "path"
+type = "string"
+description = "Filesystem path on the evo device the share exposes. Framework refuses paths outside the allowed prefix set (music library root, operator uploads root)."
+
+[[subjects.record_types.extra_share]]
+name = "guest_ok"
+type = "boolean"
+description = "Whether unauthenticated (guest) access is allowed. Widgets default to false; the operator explicitly opts in when opening a share to guests."
+
+# SMB user record — one operator-created SMB user with optional
+# domain-identity link.
+
+[[subjects.record_types.smb_user_record]]
+name = "username"
+type = "string"
+description = "SMB user name on the evo device."
+
+[[subjects.record_types.smb_user_record]]
+name = "mapped_domain_identity"
+type = "option<string>"
+description = "Canonical domain identity (device_id or peer id) this SMB user maps to. Absent when the operator created a device-local SMB user with no domain identity link."
+
+[[subjects.record_types.smb_user_record]]
+name = "created_at_ms"
+type = "i64"
+description = "Wall-clock milliseconds at SMB user creation."
+
+# ---------------------------------------------------------------
+# Enums
+# ---------------------------------------------------------------
+
+[[subjects.enums.fstype]]
+name = "cifs"
+description = "SMB / CIFS filesystem (`mount.cifs`). Uses the framework's dialect probe."
+
+[[subjects.enums.fstype]]
+name = "nfs"
+description = "NFS filesystem (`mount.nfs`). Uses kernel version negotiation (v4 → v3 fallback)."
+
+[[subjects.enums.share_state]]
+name = "mounted"
+description = "Share is mounted; files accessible at `mount_root`. Playback + browse work."
+
+[[subjects.enums.share_state]]
+name = "unmounted"
+description = "Share is not mounted. Operator-initiated (via `network.share.unmount`) or connectivity-dropped."
+
+[[subjects.enums.share_state]]
+name = "mounting"
+description = "Mount attempt is in progress. Widgets render a spinner + the current dialect being probed for CIFS."
+
+[[subjects.enums.share_state]]
+name = "failed"
+description = "Last mount attempt failed. Widgets render the operator-actionable reason from the `reason` field."
+
+# ---------------------------------------------------------------
+# Widget kinds (advisory)
+# ---------------------------------------------------------------
+
+[[widget_kinds]]
+name = "network.discovered.nas.card.list"
+description = "Discovered-NAS card in list mode (compact row per device). Consumes one `discovered_nas` record. Tap dispatches network.share.add with host + path pre-filled from the discovery."
+
+[[widget_kinds]]
+name = "network.discovered.nas.card.tile"
+description = "Discovered-NAS card in tile mode (larger tile per device). Same consumption + tap-to-add as the list variant."
+
+[[widget_kinds]]
+name = "network.share.card.list"
+description = "Configured-share card in list mode. Consumes one `share_record` + the corresponding `network_share_state` subject. Renders alias, host / path, state badge + negotiated version chip."
+
+[[widget_kinds]]
+name = "network.share.card.tile"
+description = "Configured-share card in tile mode. Same content as the list variant with a larger visual + activity-log preview."
+
+[[widget_kinds]]
+name = "network.share.config.form"
+description = "Add / edit share form. Fields: alias, fstype selector, host, path, credentials-kind selector (with per-kind sub-form for user_password + key_file), advanced_options text area. Dispatches network.share.add or network.share.edit on submit."
+
+[[widget_kinds]]
+name = "network.share.status.panel"
+description = "Full-detail per-share status panel. Consumes `network_share_state` + `network_share_events` for the share. Renders state badge, negotiated version, mount_root, last_mounted_at, and the activity log ring buffer."
+
+[[widget_kinds]]
+name = "network.smb_server.settings.form"
+description = "SMB-server settings form. Consumes `system_smb_server` subject. Fields: enabled toggle, min_protocol selector, extra_shares list-editor. Dispatches network.smb_server.apply on submit."
+
+[[widget_kinds]]
+name = "network.smb_users.list"
+description = "SMB user management list. Consumes `system_smb_server.smb_users`. Add-user button dispatches through the framework's user-interaction prompt for the password entry (which returns a vault SecretRef); revoke-user button dispatches network.smb_server.user_revoke."
+
+# ---------------------------------------------------------------
+# Acceptance criteria
+# ---------------------------------------------------------------
+
+[[acceptance]]
+name = "no-shell-file-editing"
+detail = "The operator MUST NOT need to edit /etc/fstab, /etc/samba/smb.conf, /etc/samba/smbpasswd, or /etc/credentials by hand. Every configuration touches the operator UI (or the wire ops it dispatches); the framework writes the underlying files atomically."
+
+[[acceptance]]
+name = "smb-dialect-probe-ladder"
+detail = "CIFS mounts MUST iterate the ladder `[2.0, 2.1, 3.0, 3.02, 3.1.1]` lowest-first when no operator-supplied vers= is present. First success wins; the working dialect MUST persist to the share record's persisted_vers so subsequent boots are single-attempt."
+
+[[acceptance]]
+name = "smb1-only-via-explicit-override"
+detail = "SMB1 / NT1 MUST NOT be reached by the automatic ladder. Operators wanting SMB1 explicitly set `vers=1.0` or `vers=NT1` in advanced_options — the framework does not degrade to SMB1 on its own."
+
+[[acceptance]]
+name = "nfs-kernel-negotiation"
+detail = "NFS mounts MUST NOT run a client-side probe ladder. Kernel auto-negotiates version (v4 → v3 → v2); the framework surfaces the negotiated version from /proc/mounts after success."
+
+[[acceptance]]
+name = "network-up-gated-mount"
+detail = "Boot-time mount attempts MUST wait for L3 reachability (per the `networking.link.connectivity` subject) before running. A boot with all configured NAS devices unreachable MUST complete without blocking; unmounted shares transition to mounted when connectivity restores."
+
+[[acceptance]]
+name = "busy-cifs-lazy-detach"
+detail = "Unmounting a CIFS share with open file handles MUST use lazy detach (`umount -l`). The mount table clears when the last handle closes; the unmount verb returns immediately with the request-accepted outcome."
+
+[[acceptance]]
+name = "password-never-on-wire"
+detail = "Passwords MUST live in the evo credential vault, referenced by opaque SecretRef in share records + SMB user records. Passwords MUST NOT appear on the wire at rest or in transit; the operator's user-interaction prompt is the only path a password crosses."
+
+[[acceptance]]
+name = "singleton-configured-subject"
+detail = "Exactly one `system_network_shares_configured` subject instance per node. Republished on every add / edit / remove verb."
+
+[[acceptance]]
+name = "singleton-smb-server-subject"
+detail = "Exactly one `system_smb_server` subject instance per node. Republished on every network.smb_server.apply."
+
+[[acceptance]]
+name = "per-share-state-subject-instance-per-share"
+detail = "Exactly one `network_share_state` subject instance per configured share, keyed by share_id. Republished on every state transition. Retired when the share is removed."
+
+[[acceptance]]
+name = "audit-ledger-emission-per-verb"
+detail = "Every verb on this shelf MUST emit an audit-ledger entry per the framework's operations-admin discipline: verb name, principal id, arguments (with password fields redacted), outcome. Wire failures still emit — the entry carries the failure reason."
