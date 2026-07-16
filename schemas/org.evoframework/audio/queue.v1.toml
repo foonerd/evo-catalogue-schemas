@@ -196,6 +196,41 @@ structured Permanent error when no available item exists
 past the current position.
 """
 
+[[requests]]
+request_type = "queue.play_from_position"
+description = """
+Set the queue's current position to the addressed entry and
+start playback in a single call. Payload is
+`{ v: 1, position: u32 }` where `position` is the zero-based
+queue index (matches `QueueItem.position` on the `audio_queue`
+subject).
+
+Semantics:
+
+- The addressed entry becomes the currently-playing item and
+  MPD transitions to the Play state — regardless of prior
+  state (Stop, Pause, or a different position playing). One
+  verb, both steps.
+- With shuffle (`random 1`) active, the addressed entry plays;
+  MPD's own random ordering continues from that anchor. The
+  operator's tap-to-play intent overrides the shuffle order for
+  this one selection.
+- Position out of range refuses with structured Permanent
+  error subclass `position_out_of_range` naming the offending
+  index and the current queue length. No state change.
+- Empty queue refuses with structured Permanent error subclass
+  `queue_empty`. No state change.
+- Unavailable / unreadable entry at the addressed position:
+  MPD's own playback ACK surfaces as the same failure shape
+  `queue.skip_to_next_available` already emits, so operator UI
+  reuses one error path.
+- Fan-out: the `audio_now_playing` subject republishes (as
+  `next` / `previous` do); no new happening is emitted for
+  this verb.
+
+Returns `{ v: 1, status: "ok" }` on success.
+"""
+
 # Acceptance rows — invariants the shelf contract pins
 # against future contributor drift. These are informational
 # at admission today (no runtime assertion harness yet); they
@@ -235,6 +270,10 @@ detail = "`queue.get_queue` is read-only (no queue mutation) and is the sanction
 [[acceptance]]
 name = "queue-skip-to-next-available-emits-disposition"
 detail = "`queue.skip_to_next_available` MUST emit one or more disposition records to the `audio_playback_disposition` subject (see audio.playback.v1). The dispositions document the autonomous skip decisions made on the operator's behalf and carry the recovery hints the UI consumes. Per-item dispositions for runs of consecutive same-kind same-source skips MUST coalesce into a single `TracksSkippedRun` disposition with `count + from_position + to_position` — per-item emission for runs is forbidden."
+
+[[acceptance]]
+name = "queue-play-from-position-validates-before-dispatch"
+detail = "`queue.play_from_position` MUST validate the requested position against the current queue length BEFORE dispatching the MPD `play <pos>` command. Empty queue MUST refuse with structured Permanent error subclass `queue_empty`; position >= queue length MUST refuse with subclass `position_out_of_range` naming both the offending index and the current length. No state change on either refusal. The pre-validation is the guarantee UI consumers rely on to render the operator-facing error inline without a mid-request state race — the MPD wire remains untouched when the pre-check fails."
 
 [[acceptance]]
 name = "queue-item-carries-artwork-url"
