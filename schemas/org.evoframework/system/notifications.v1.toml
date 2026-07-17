@@ -3,15 +3,16 @@
 
 # Schema for the `system.notifications` shelf at shape version 1.
 #
-# Framework-tier substrate for operator-visible notifications.
-# Any plugin that surfaces a condition to the operator (doorbell
-# ringing, alarm firing, plugin admission needing consent, source
-# unreachable, retention prune anomaly) emits a Notification via
-# the SDK's `NotificationEmitter` trait. The framework's
-# NotificationDispatcher resolves the active mode against the
-# base + quiet-hours policy, coalesces by optional group id,
-# assigns a handle, and republishes the active list as this
-# shelf's `system.notifications.active` subject.
+# Framework-tier operator-visible notifications shelf. Any plugin
+# that surfaces a condition to the operator (doorbell ringing,
+# alarm firing, plugin admission needing consent, source
+# unreachable, retention prune anomaly) emits a Notification by
+# dispatching `system.notifications.send` on this shelf. The
+# reference plugin stocking the shelf owns the in-memory
+# dispatcher: resolves the active mode against the base + quiet-
+# hours policy, coalesces by optional group id, assigns a handle,
+# and republishes the active list as this shelf's
+# `system.notifications.active` subject.
 #
 # The subject is the UI-team consumption surface: one subscription
 # yields the full active list plus every subsequent transition
@@ -20,10 +21,12 @@
 # mode-selector widgets against the envelope; consuming code
 # never polls.
 #
-# Reference plugin: no vendor implementation — the shelf's back
-# end lives inside the framework runtime, not in a discrete
-# plugin. This shelf exists to declare the wire contract the UI
-# consumes, not to name a plugin that handles it.
+# Reference plugin: `org.evoframework.system.notifications`
+# (framework-reserved namespace). Vendor distributions may ship
+# a replacement under a vendor namespace for a different back-end
+# (desktop-environment integration, mobile push, siren) provided
+# it stocks the same five verbs and publishes the same subject
+# shape.
 
 schema_version = 1
 rack = "system"
@@ -32,19 +35,19 @@ shape = 1
 
 description = """
 Framework-tier operator-visible notifications shelf. Plugin
-authors emit notifications via the SDK's NotificationEmitter;
-the framework dispatcher resolves the mode, registers the
-notification, assigns a handle, and republishes the active list
-on the shelf's active subject. Operator surfaces consume the
-subject to render banner / tray / DND-toggle / quiet-hours-editor
-/ chime-mode-selector widgets.
+authors emit notifications by dispatching
+`system.notifications.send` on this shelf; the reference plugin
+resolves the mode, registers the notification, assigns a handle,
+and republishes the active list on the shelf's active subject.
+Operator surfaces consume the subject to render banner / tray /
+DND-toggle / quiet-hours-editor / chime-mode-selector widgets.
 """
 
-# Verbs the framework exposes on this shelf. Both target the
-# operator-controlled base mode and quiet-hours policy that
-# govern how sent notifications render. Handled by the framework
-# runtime, not by an admitted plugin — the wire dispatcher
-# routes these verbs directly to the NotificationDispatcher.
+# Verbs stocked on the shelf. All five are handled by the
+# admitted plugin — the framework routes to it via the plugin
+# router. Read/emit/cancel are anonymous; mode + quiet-hours
+# are step-up-gated against system_admin at the framework
+# dispatcher.
 
 [[requests]]
 request_type = "system.notifications.list_active"
@@ -87,15 +90,35 @@ payload_in = "tbd-review"
 payload_out = "tbd-review"
 
 [[requests]]
+request_type = "system.notifications.send"
+description = """
+Emit a notification. Any plugin may dispatch this verb; the
+payload is a full `Notification` record (level / priority /
+source_plugin / title_key / body_key / audio_payload / actions /
+group_with / auto_dismiss_after / display_widget). The reference
+plugin resolves the active mode against the current base +
+quiet-hours policy, coalesces on `group_with` when present,
+assigns a handle, and returns `{ handle, resolved_mode }`.
+Republishes the active list envelope on the shelf's active
+subject. Attribution flows via the payload's `source_plugin`
+field; forgery is a plugin-to-plugin trust concern the framework
+does not police at admission (a follow-on framework enhancement
+may inject caller identity into the request context so the
+reference plugin can enforce). Not idempotent — every call adds
+a new active entry (or coalesces one onto an existing group).
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
 request_type = "system.notifications.cancel"
 description = """
 Cancel an active notification by handle. Idempotent — cancelling
 an unknown handle returns NotFound without altering state.
 Republishes the active list with the entry removed on return.
-Distinct from plugin-side cancel (which routes through the
-NotificationEmitter trait) in that this verb is operator-driven
-(dismiss from the tray) rather than plugin-driven (condition
-cleared).
+Used both by operator gestures (banner / tray dismiss) and by
+plugins retracting a notification when its underlying condition
+clears (e.g. doorbell stops ringing before auto-dismiss fires).
 """
 payload_in = "tbd-review"
 payload_out = "tbd-review"
@@ -389,8 +412,8 @@ name = "group-coalesce-preserves-first-handle"
 detail = "When a new notification coalesces into an existing group entry, the group's handle MUST be the first entry's handle (not the newest). Consumers rendering the group card use the handle as its identity; a handle that shifts to the newest entry forces re-render on every group member arrival."
 
 [[acceptance]]
-name = "source-plugin-attribution-enforced"
-detail = "The framework wrapper MUST overwrite the notification's `source_plugin` field with the emitting plugin's canonical name before reaching the dispatcher. Plugins cannot spoof another plugin's name on the operator surface."
+name = "source-plugin-attribution-payload-driven"
+detail = "The `source_plugin` field on the emit payload MUST be the plugin's canonical name. The reference plugin records whatever value the payload carries and surfaces it on the tray. Framework-level attribution enforcement (rejecting mismatched payloads at dispatch time) is not currently in scope; it becomes possible once the request context carries a framework-populated caller-identity field."
 
 [[acceptance]]
 name = "cancel-verb-idempotent"
