@@ -58,6 +58,58 @@ audit-ledger emission per gesture.
 # plugin (framework runtime) never re-checks the principal — the
 # framework dispatcher is the authoritative gate.
 
+# --- Share management (read-side) ---
+
+# Read-then-subscribe seed verbs. Each returns the current
+# subject envelope so a freshly-connecting UI consumer can render
+# the first frame without waiting for the next state change; the
+# read is idempotent and cheap (in-memory copy of the persisted
+# record set / the discovery cache / the per-share state map).
+# After the read the consumer subscribes via subscribe_happenings
+# (SubjectStateChanged filter) for deltas.
+
+[[requests]]
+request_type = "network.share.list_configured"
+description = """
+Read the current configured-share set. Returns the same
+`configured_shares_envelope` shape the
+`system_network_shares_configured` subject carries — full
+`{ v: 1, shares: [share_record...], last_update_at }` snapshot.
+Idempotent; no state change; framework-runtime-owned (no plugin
+stocks this verb).
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "network.discovery.list"
+description = """
+Read the current discovered-NAS cache. Returns the same
+`discovered_nas_envelope` shape the
+`system_network_shares_discovered` subject carries — full
+`{ v: 1, nas: [discovered_nas...], last_refresh_at }` snapshot
+of whatever the last completed discovery sweep produced (or the
+empty envelope when no sweep has completed since boot).
+Idempotent; does NOT trigger a fresh sweep — use
+`network.discovery.refresh` for that. Framework-runtime-owned.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "network.share.get_state"
+description = """
+Read the current per-share `network_share_state` for one share.
+Payload is `{ v: 1, share_id: string }`. Returns
+`{ v: 1, envelope: share_state_envelope | null }`. The envelope
+is null when no share exists with the given id; otherwise
+carries `{ share_id, alias, state, reason?, negotiated_vers?,
+last_transition_at_ms }` (exact shape the `network_share_state`
+subject publishes). Framework-runtime-owned.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
 # --- Share management ---
 
 [[requests]]
@@ -141,6 +193,21 @@ payload_in = "tbd-review"
 payload_out = "tbd-review"
 
 # --- Server-side SMB ---
+
+[[requests]]
+request_type = "network.smb_server.get_state"
+description = """
+Read the current SMB-server state. Returns the same
+`system_smb_server_envelope` shape the `system_smb_server`
+subject carries — `{ v: 1, envelope: { enabled, min_protocol,
+extra_shares, smb_users, last_apply_at_ms, last_update_at } }`.
+The `smb_users` array carries the public-fields projection
+(`{ username, mapped_domain_identity?, created_at_ms }`) — the
+credential_key is never surfaced on the wire. Idempotent; no
+state change; framework-runtime-owned.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
 
 [[requests]]
 request_type = "network.smb_server.apply"

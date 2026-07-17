@@ -47,6 +47,21 @@ subject to render banner / tray / DND-toggle / quiet-hours-editor
 # routes these verbs directly to the NotificationDispatcher.
 
 [[requests]]
+request_type = "system.notifications.list_active"
+description = """
+Read the current active-notifications envelope. Returns the same
+shape the `system_notifications_active` subject carries:
+`{ v: 1, envelope: { active: [active_notification...], base_mode,
+quiet_hours_active, quiet_hours_policy, last_update_at } }`.
+Read-then-subscribe seed for the tray + banner widgets so a
+freshly-connecting UI consumer renders the first frame without
+waiting for the next send / cancel. Idempotent; no state change;
+framework-runtime-owned.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
 request_type = "system.notifications.set_base_mode"
 description = """
 Set the operator's base notification mode. `display_only` shows
