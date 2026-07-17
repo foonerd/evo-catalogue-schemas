@@ -25,11 +25,16 @@
 #   version, recent-event ring-buffer per share, one subject
 #   instance per share_id.
 #
-# Reference plugin: no vendor implementation ships today — the
-# runtime primitives (NetworkSharesRuntime + SambaServerRuntime)
-# live in the framework runtime, not in a discrete plugin. The
-# shelf declares the wire contract UI consumers subscribe to;
-# the runtime primitives land in immediately-following commits.
+# Reference plugins: `org.evoframework.network.shares` (share-
+# management + discovery half) and
+# `org.evoframework.network.smb-server` (evo-as-SMB-server half).
+# Both live in the framework-reserved namespace and co-stock this
+# shelf under the multi-occupant admission gate; the framework's
+# dispatch-time verb-partition routing lands each declared verb
+# on the plugin that stocked it. Vendor distributions may replace
+# either half by shipping a same-shape plugin under a vendor
+# namespace; the shelf schema declares the wire contract, not
+# the implementation binding.
 
 schema_version = 1
 rack = "networking"
