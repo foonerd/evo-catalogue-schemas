@@ -127,6 +127,37 @@ resulting share state on the per-share subject. Returns the
 minted share_id + initial mount outcome. Idempotent — adding a
 share with a duplicate alias returns Invalid; the operator
 edits or removes the prior record first.
+
+Payload shape (client → plugin):
+  { alias, fstype, host, path, credentials, advanced_options }
+
+The `credentials` field is a tagged union:
+- `{ kind = "guest" }` — no authentication.
+- `{ kind = "user_password", username, credential_key }` —
+  the operator supplies `username` and the client mints a
+  stable `credential_key` (widget convention: derive from
+  the operator-set share alias so re-adds resolve to the same
+  vault entry). The password itself is NEVER on the wire.
+- `{ kind = "key_file", username, credentials_path }` —
+  path to a mode-0600 credentials file the plugin reads at
+  mount time.
+
+Prompt-on-add flow (kind = "user_password"):
+When the record's `credential_key` is not already in the
+plugin's credential vault, the plugin raises a
+`PromptType::Password` prompt via the framework's
+user-interaction responder BEFORE attempting mount. The
+responder returns the operator's answer; the plugin persists
+it under `credential_key` and proceeds with mount. If the
+prompt is cancelled or times out, the record is left in
+place with a mount_error naming the cancellation reason; the
+operator retries via `network.share.mount`, which re-prompts.
+
+The `credential_key` field is required for user_password
+shares — a missing field is a serde deserialisation error at
+the plugin boundary. Clients that construct the request from
+form input must set the field explicitly (widget contract:
+derive from the operator-set alias).
 """
 payload_in = "tbd-review"
 payload_out = "tbd-review"
@@ -166,6 +197,14 @@ persisted_vers so subsequent boots are single-attempt. On NFS,
 single mount attempt with kernel negotiation (v4 → v3
 fallback). Republishes the per-share subject with the mount
 outcome.
+
+Prompt-on-mount flow: for user_password shares whose
+`credential_key` is not in the plugin's vault, the plugin
+raises a `PromptType::Password` prompt via the framework's
+user-interaction responder before dispatching the mount
+helper. This is the retry path after a cancelled add-time
+prompt: the record already carries the credential_key, but
+the vault entry is absent, so re-mounting re-prompts.
 """
 payload_in = "tbd-review"
 payload_out = "tbd-review"
