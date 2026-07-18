@@ -133,14 +133,21 @@ Payload shape (client → plugin):
 
 The `credentials` field is a tagged union:
 - `{ kind = "guest" }` — no authentication.
-- `{ kind = "user_password", username, credential_key }` —
-  the operator supplies `username` and the client mints a
-  stable `credential_key` (widget convention: derive from
-  the operator-set share alias so re-adds resolve to the same
-  vault entry). The password itself is NEVER on the wire.
-- `{ kind = "key_file", username, credentials_path }` —
-  path to a mode-0600 credentials file the plugin reads at
-  mount time.
+- `{ kind = "user_password", username, credential_key, domain? }`
+  — the operator supplies `username` and (optionally) a
+  `domain` (AD workgroup or Windows domain; required for any
+  domain-joined NAS such as a Synology in AD mode or a
+  Windows Server share). The client mints a stable
+  `credential_key` (widget convention: derive from the
+  operator-set share alias so re-adds resolve to the same
+  vault entry). The password itself is NEVER on the wire and
+  NEVER on the mount helper's argv — the plugin stages a
+  mode-0600 credentials file with `username=`, `password=`,
+  and (when present) `domain=` lines and passes the file's
+  path to `mount.cifs` via `credentials=<path>`.
+- `{ kind = "key_file", credentials_path }` — path to an
+  operator-managed mode-0600 credentials file the plugin
+  references via `credentials=<path>` directly.
 
 Prompt-on-add flow (kind = "user_password"):
 When the record's `credential_key` is not already in the
