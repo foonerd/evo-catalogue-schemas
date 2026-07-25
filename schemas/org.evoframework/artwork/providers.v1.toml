@@ -122,3 +122,113 @@ detail = "Resized variants preserve aspect ratio. The size taxonomy is interpret
 [[acceptance]]
 name = "resolve-no-upscale-on-small-sources"
 detail = "Source images smaller than the target bounding box are passed through verbatim — no upscale. Upscaling adds softness without adding information; the operator gets the master fidelity instead."
+
+# ------------------------------------------------------------
+# artwork.resolve_online — album-artwork cascade over online
+# providers. Distinct from `artwork.resolve` (local plugin) so
+# co-occupants of the shelf partition the verb set: local owns
+# the local resolve, online owns the online cascade.
+# ------------------------------------------------------------
+
+[[requests]]
+request_type = "artwork.resolve_online"
+description = """
+Resolve album artwork from online providers (Cover Art Archive
++ Last.fm + iTunes + Volumio meta proxy). Same
+request-payload shape as `artwork.resolve`; the transcode +
+asset-cache posture mirrors the local resolver so consumers
+use one decoder across both cascade tiers. Adds
+`provider_id` on `status = "ok"` naming which upstream
+returned the bytes (`cover_art_archive` / `lastfm` / `itunes` /
+`volumio_meta`).
+
+Response gains a distinct `status = "unavailable"` value when
+the online cascade was reachable-but-transient (rate-limit,
+5xx, timeout, transcode fault). Callers MUST NOT cache
+`unavailable` as absence — the transient-not-cached invariant.
+
+Reference plugin: `org.evoframework.artwork.online`.
+"""
+
+[[requests]]
+request_type = "artwork.resolve_artist_artwork"
+description = """
+Aggregate artist-artwork cascade. Runs enabled artwork
+providers in parallel (`volumio_meta` artistArt +
+`theaudiodb` artist thumb + `deezer` artist portrait +
+`fanart_tv` HD backgrounds / logos / banners) and returns
+every source that contributed content-bearing artwork as a
+`sources: Vec<SourceEntry>` array, ordered by the operator's
+per-provider priority. Top-level `provider_id` /
+`privacy_class` / `attribution` mirror `sources[0]`; top-level
+`payload` is the field-level first-non-empty merge across
+every source (Jellyfin / beets pattern). The operator UI's
+per-source selection surface reads `sources` directly.
+
+Request payload (v1):
+
+```json
+{
+  "v": 1,
+  "artist": "<display name>",
+  "artist_mbid": "<MusicBrainz artist MBID (optional)>"
+}
+```
+
+`artist` is required. `artist_mbid` unlocks fanart.tv (which
+keys on MBID exclusively); other providers use it as a
+disambiguator when present. Without a stored fanart.tv key
+the fanart_tv source is skipped silently.
+
+Response payload (v1):
+
+```json
+{
+  "v": 1,
+  "status": "ok" | "not_found" | "not_configured" | "bad_request",
+  "provider_id": "<sources[0].provider_id>" | null,
+  "privacy_class": "anonymous" | "identity_bearing" | null,
+  "payload": <field-level first-non-empty merge across sources> | null,
+  "detail": "<operator-readable detail>" | null,
+  "attribution": { "source_name": "...", "source_url": "...", "license": "..." } | null,
+  "sources": [
+    {
+      "provider_id": "volumio_meta" | "theaudiodb" | "deezer" | "fanart_tv",
+      "privacy_class": "anonymous" | "identity_bearing",
+      "payload": <provider-specific fields>,
+      "attribution": { "source_name": "...", "source_url": "...", "license": "..." }
+    }
+  ]
+}
+```
+
+Deezer-specific invariant: the source's `payload` carries
+`cache_policy: "live_fetch_only"`. Deezer's response body
+MUST NOT be persisted by any downstream consumer; the URLs
+render live from Deezer's CDN. Enforced structurally at the
+plugin boundary by `ArtistImageHit`'s deliberate absence of
+`Serialize`.
+
+Transient upstream errors (network timeout, 5xx, 429) NEVER
+cache and NEVER surface a non-`None` source entry. Silence
+is a cascade-level skip; the aggregate uses the entries that
+did return.
+
+Reference plugin: `org.evoframework.artwork.online`.
+"""
+
+[[acceptance]]
+name = "artist-artwork-sources-per-contributor"
+detail = "For a query where two or more providers are enabled and available for the artist, `sources` MUST contain a populated entry for EACH provider that returned content — not only the first — each with non-empty payload and correct attribution."
+
+[[acceptance]]
+name = "artist-artwork-priority-orders-sources"
+detail = "Operator per-source priority determines both which entries appear in `sources` (only enabled providers) and their order (priority ascending, provider_id ascending). Top-level `provider_id` / `attribution` mirror `sources[0]`."
+
+[[acceptance]]
+name = "artist-artwork-toggle-live"
+detail = "Setting `enabled = false` on a provider via `online_providers_set_enabled` removes that provider's entry from the next query's `sources` without a plugin restart. Re-enable restores the entry on the next query."
+
+[[acceptance]]
+name = "artist-artwork-deezer-live-fetch-only"
+detail = "The deezer source's payload carries `cache_policy: \"live_fetch_only\"`. Downstream consumers rendering the image URLs MUST NOT persist the resulting bytes — Deezer's ToS restricts image caching. The plugin's `ArtistImageHit` type deliberately omits `Serialize` so persisting the response body is a compile error, not merely a policy."
