@@ -3,13 +3,8 @@
 
 # Schema for the `networking.link` shelf at shape version 1.
 #
-# Link-control plugins manage network connections, scanning,
-# captive-portal flows, security posture, and flight-mode state
-# over a specific back-end (NetworkManager, systemd-networkd,
-# etc.). Cardinality is one plugin per device.
-#
-# Reference plugin: `org.evoframework.network` in
-# evo-device-audio (NetworkManager back-end).
+# Reference plugin: `org.evoframework.network` in evo-device-audio
+# (NetworkManager back-end via nmcli + iw + rfkill).
 
 schema_version = 1
 rack = "networking"
@@ -19,144 +14,144 @@ shape = 1
 description = """
 Network link-control shelf. Plugin implements connection
 management (status, scan, intent get/set/apply), captive-portal
-detection and flow (status/start/submit/complete), security
-posture (status, harden), and flight-mode coordination
-(get/set). Single-claimant per shelf.
+detection and flow, security posture, flight-mode / radio
+policy, wifi device inventory, and connectivity refresh.
+Single-claimant per shelf.
 """
-
-# 13 request_types declared in the reference plugin's manifest.
-# Per-verb payload contracts pending plugin-author review.
 
 [[requests]]
 request_type = "network.nm.status"
-description = "Returns current link state, active connection details, captive-portal status, and signal metrics."
-payload_in = "tbd-review"
-payload_out = "tbd-review"
+description = "Returns current link state, active connections, captive-portal status, radio/flight snapshot, and signal metrics."
+payload_in = "{}"
+payload_out = "{ v:1, status:ok|error, devices:[], connectivity:object, flight_mode:object, captive:object }"
 
 [[requests]]
 request_type = "network.nm.scan"
-description = "Triggers a Wi-Fi scan and returns the resulting access-point list with signal / security info."
-payload_in = "tbd-review"
-payload_out = "tbd-review"
+description = "Triggers a Wi-Fi scan and returns access-point list with signal/security/band info plus BSSID candidates."
+payload_in = "{ ifname?: string }"
+payload_out = "{ v:1, status:ok|error, available:[{ssid, signal, security, ...}], candidates:[{ssid, bssid, band, signal_pct}], cache_hit?: bool }"
 
 [[requests]]
 request_type = "network.nm.intent.get"
-description = "Returns the current connection intent (declared profile, autoconnect state, security parameters)."
-payload_in = "tbd-review"
-payload_out = "tbd-review"
+description = "Returns the persisted NetworkIntent envelope (ethernet, wifi, fallback, radio_policy)."
+payload_in = "{}"
+payload_out = "{ v:1, status:ok, intent:{ version, ethernet, wifi, fallback, radio_policy } }"
 
 [[requests]]
 request_type = "network.nm.intent.set"
-description = "Updates the connection intent without applying. Apply is a separate verb."
-payload_in = "tbd-review"
-payload_out = "tbd-review"
+description = "Updates the connection intent without applying. Secrets (PSK) travel as sidecar fields, not in intent.toml."
+payload_in = "{ intent: NetworkIntent, sta_psk?: string, ap_psk?: string }"
+payload_out = "{ v:1, status:ok, intent: NetworkIntent }"
 
 [[requests]]
 request_type = "network.nm.intent.apply"
-description = "Applies the current intent (connect / disconnect / reconfigure per the declared profile)."
-payload_in = "tbd-review"
-payload_out = "tbd-review"
+description = "Applies the current intent (ethernet/STA/AP/hotspot/regdomain). Returns step log."
+payload_in = "{}"
+payload_out = "{ v:1, status:ok|error, ok: bool, steps:[string] }"
 
 [[requests]]
 request_type = "network.nm.captive.status"
 description = "Returns captive-portal detection state (none, detected, in-flow, completed)."
-payload_in = "tbd-review"
-payload_out = "tbd-review"
+payload_in = "{}"
+payload_out = "{ v:1, status:ok, captive:{ phase, portal_url?, ... } }"
 
 [[requests]]
 request_type = "network.nm.captive.start"
 description = "Initiates a captive-portal flow. Returns a session token consumed by submit/complete."
-payload_in = "tbd-review"
-payload_out = "tbd-review"
+payload_in = "{}"
+payload_out = "{ v:1, status:ok, session_token: string }"
 
 [[requests]]
 request_type = "network.nm.captive.submit"
-description = "Submits captive-portal credentials (typically routed via user-interaction prompt)."
-payload_in = "tbd-review"
-payload_out = "tbd-review"
+description = "Submits captive-portal credentials for the active session."
+payload_in = "{ session_token: string, credentials: object }"
+payload_out = "{ v:1, status:ok|error }"
 
 [[requests]]
 request_type = "network.nm.captive.complete"
-description = "Marks the captive-portal session complete. Plugin verifies connectivity and returns final status."
-payload_in = "tbd-review"
-payload_out = "tbd-review"
+description = "Marks the captive-portal session complete. Plugin verifies connectivity."
+payload_in = "{ session_token: string }"
+payload_out = "{ v:1, status:ok|error, connectivity: object }"
 
 [[requests]]
 request_type = "network.nm.security.status"
-description = "Returns network-security posture (encryption type, weak-cipher warnings, MAC randomisation state)."
-payload_in = "tbd-review"
-payload_out = "tbd-review"
+description = "Returns network-security posture (PSK encryption at rest, harden hints)."
+payload_in = "{}"
+payload_out = "{ v:1, status:ok, security: object }"
 
 [[requests]]
 request_type = "network.nm.security.harden"
-description = "Applies a hardened network-security configuration (per declared policy)."
-payload_in = "tbd-review"
-payload_out = "tbd-review"
+description = "Applies hardened secret-at-rest configuration."
+payload_in = "{ enforce_runtime?: bool }"
+payload_out = "{ v:1, status:ok|error, security: object }"
 
 [[requests]]
 request_type = "network.nm.flight_mode.get"
-description = "Returns flight-mode state for the wireless rack-class. Coordinates with the framework's flight-mode signal."
-payload_in = "tbd-review"
-payload_out = "tbd-review"
+description = "Returns flight-mode state for the wireless class."
+payload_in = "{}"
+payload_out = "{ v:1, status:ok, flight_mode:{ enabled: bool, radio?: object } }"
 
 [[requests]]
 request_type = "network.nm.flight_mode.set"
-description = "Sets flight-mode for the wireless rack-class. Emits FlightModeChanged happening on transition."
-payload_in = "tbd-review"
-payload_out = "tbd-review"
+description = "Sets flight-mode for the wireless class. On success the steward's post-dispatch hook emits Happening::FlightModeChanged { rack_class: \"wireless\", on: <enabled> } — single bus emission, no plugin-side duplicate."
+payload_in = "{ enabled: bool }"
+payload_out = "{ v:1, status:ok, flight_mode:{ enabled: bool, radio?: object } }"
+
+[[requests]]
+request_type = "network.nm.radio.status"
+description = "Returns composed Wi-Fi radio preference view (flight + preference + rfkill)."
+payload_in = "{}"
+payload_out = "{ v:1, status:ok, flight_mode: bool, radios:{ wifi: object } }"
+
+[[requests]]
+request_type = "network.nm.radio.set"
+description = "Sets per-family Wi-Fi preference (beyond flight mode). radio must be wifi."
+payload_in = "{ radio: \"wifi\", preference: \"on\"|\"off\"|bool }"
+payload_out = "{ v:1, status:ok, applied: bool, flight_mode: bool, radios:{ wifi: object } }"
 
 [[requests]]
 request_type = "network.nm.supervisor.status"
-description = "Returns the runtime supervisor's current reachability state (online / portal / limited / offline), critical-recovery flag, last-observations snapshot, and captive-portal URL when present. Read-only; the supervisor publishes state changes on a reactive subject for UI subscribers."
-payload_in = "tbd-review"
-payload_out = "tbd-review"
+description = "Returns runtime supervisor reachability view (online/portal/limited/offline, critical recovery, observations)."
+payload_in = "{}"
+payload_out = "{ v:1, status:ok, supervisor: object }"
 
 [[requests]]
 request_type = "network.nm.wifi_devices"
-description = "Returns the live Wi-Fi radio inventory — one row per kernel netdev with backing PHY, supported interface modes, concurrent managed+AP capability, per-band support (2.4 / 5 / 6 GHz), connection class (onboard vs USB), and virtual-AP-vif flag. Read-only; drives operator UI surface for STA / AP preferred-interface choice."
-payload_in = "tbd-review"
-payload_out = "tbd-review"
+description = "Live Wi-Fi radio inventory — PHY, modes, concurrent managed+AP, bands, connection class, virtual-AP-vif flag."
+payload_in = "{}"
+payload_out = "{ v:1, status:ok, devices:[{ ifname, phy, modes:[], supports_managed_plus_ap, bands, ... }] }"
 
 [[requests]]
 request_type = "network.refresh_connectivity"
-description = "Triggers an on-demand connectivity-state refresh and returns the freshly-published `networking.link.connectivity` subject value. Honours the plugin's `probe_kind` config — when set to `off`, returns the subject without performing an HTTP probe (other connectivity fields are still re-evaluated). Read-side wire-op; no admin scope required."
-payload_in = "tbd-review"
-payload_out = "tbd-review"
+description = "On-demand connectivity-state refresh; returns freshly published networking.link.connectivity subject value."
+payload_in = "{}"
+payload_out = "{ v:1, status:ok, connectivity: object }"
 
-# Reactive bus taxonomy emitted by the supervisor's transition
-# watcher as `Happening::PluginEvent` instances. Listed here for
-# discoverability; payload contracts pending plugin-author
-# review alongside the wire-op payloads.
-#
-# event_type values:
-#   - network.reachability_changed        # state transitions
-#   - network.portal_detected             # captive-portal entry
-#   - network.critical_recovery_raised    # autonomous hotspot up
-#   - network.sta_restored                # autonomous STA rejoin
+# Intent field contract (NetworkIntent) — mirrored in
+# NETWORK_REQUESTS_V1.md:
+#   ethernet.{enabled, device|ifname, ipv4_mode, ipv4_address, ipv4_gateway, ipv4_dns[]}
+#   wifi.{ifname, role, sta_ssid, sta_open, sta_hidden, sta_ipv4_*,
+#         sta_selection_mode, sta_preferred_band, sta_lock_bssid,
+#         ap_ssid, ap_channel, ap_band}
+#   fallback.{hotspot_enabled, hotspot_connection_name, hotspot_ifname, hotspot_fallback}
+#   radio_policy.{flight_mode, wifi_enabled_pref, bluetooth_enabled_pref,
+#                 band_priority[], country, band_2ghz, band_5ghz, band_6ghz}
 
-# Published subjects — read-able surface for UI, peer plugins,
-# and operator wire-op consumers.
-#
-# The link-control plugin publishes `networking.link.connectivity`
-# whenever it is admitted. The subject carries the current
-# connectivity verdict; it is updated on rtnetlink carrier /
-# route changes, NetworkManager D-Bus Connectivity /
-# PrimaryConnection signals, on-demand probe via the
-# `refresh_connectivity` wire-op, or the polling source's
-# adaptive-tick fallback (cold-start only). Consumers read the
-# subject through the framework's subject-state addressing; they
-# do NOT need to subscribe to the happenings stream.
-#
-# The subject's `internet_reachable` field carries the
-# probe verdict (`None` until first probe; `None` when
-# `probe_kind = off` and no probe has been requested). LAN
-# share-mount controllers gate on `carrier + ip_address +
-# default_gateway + dns_resolves` (no Internet needed for LAN
-# shares). Online-metadata consumers gate on `internet_reachable`.
+# Reactive bus PluginEvent taxonomy — emitted by the
+# supervisor's transition watcher (not by verb dispatch);
+# consumers subscribe to Happening::PluginEvent { plugin =
+# "org.evoframework.network", event_type = <one of below> }:
+#   network.reachability_changed
+#   network.portal_detected
+#   network.critical_recovery_raised
+#   network.sta_restored
+# Flight-mode transitions travel on Happening::FlightModeChanged
+# via the steward post-dispatch hook — NOT on this PluginEvent
+# channel (single story, no duplicate).
 
 [[subjects]]
 name = "networking.link.connectivity"
-description = "Current connectivity verdict published by the link-control plugin. Updated on rtnetlink / NM events, on-demand probe via wire-op, or polling-source adaptive-tick cold-start fallback. Default `probe_kind = off` means `internet_reachable` reports `None` (no third-party probing without operator opt-in)."
+description = "Current connectivity verdict published by the link-control plugin."
 
 [[subjects.fields]]
 name = "interface_up"
@@ -171,7 +166,7 @@ description = "At least one non-loopback interface has link carrier."
 [[subjects.fields]]
 name = "ip_address"
 type = "option<ip_addr>"
-description = "Preferred routable address (first non-link-local on the primary interface)."
+description = "Preferred routable address."
 
 [[subjects.fields]]
 name = "default_gateway"
@@ -186,12 +181,12 @@ description = "Last DNS resolution attempt succeeded."
 [[subjects.fields]]
 name = "internet_reachable"
 type = "option<bool>"
-description = "Last probe verdict. `None` until first probe; `None` indefinitely when `probe_kind = off`."
+description = "Last probe verdict. None until first probe or when probe_kind=off."
 
 [[subjects.fields]]
 name = "last_probe_at"
 type = "option<system_time>"
-description = "Timestamp of the last probe attempt regardless of verdict."
+description = "Timestamp of the last probe attempt."
 
 [[subjects.fields]]
 name = "last_change_at"
@@ -213,12 +208,8 @@ detail = "Plugin survives back-end loss (NetworkManager service stop) without pa
 
 [[acceptance]]
 name = "link-flight-mode-emits"
-detail = "flight_mode.set transitions emit `Happening::FlightModeChanged { rack_class: \"wireless\", on: <state> }`."
+detail = "network.nm.flight_mode.set transitions emit Happening::FlightModeChanged { rack_class: \"wireless\", on: <state> }."
 
 [[acceptance]]
 name = "link-captive-flow-non-blocking"
 detail = "Captive-portal flow does not block other request_types. Status / scan / flight_mode remain serviceable mid-flow."
-
-# NOTE: per-verb payload contracts pending plugin-author review.
-# Reviewing alongside `org.evoframework.network`'s shipped
-# wire contract is a v0.2.0 release item for this schemas repo.
