@@ -122,6 +122,12 @@ payload_in = "{}"
 payload_out = "{ v:1, status:ok, devices:[{ ifname, phy, modes:[], supports_managed_plus_ap, bands, ... }] }"
 
 [[requests]]
+request_type = "network.nm.wifi.disconnect"
+description = "Drop the active Wi-Fi STA link while preserving the saved profile — `nmcli device disconnect <wifi-ifname>`. Distinct from Forget (which clears wifi.sta_ssid in intent). Leaves evo-network-wifi-sta in place with its SSID and PSK sidecar; a later reconnect needs no re-entry. Gated write:network_admin (paired-operator connect path)."
+payload_in = "{}"
+payload_out = "{ v:1, status:ok|error, disconnected: bool, ifname: string, device_state: string, detail?: string }"
+
+[[requests]]
 request_type = "network.refresh_connectivity"
 description = "On-demand connectivity-state refresh; returns freshly published networking.link.connectivity subject value."
 payload_in = "{}"
