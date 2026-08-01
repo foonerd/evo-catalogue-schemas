@@ -128,6 +128,24 @@ payload_in = "{}"
 payload_out = "{ v:1, status:ok|error, disconnected: bool, ifname: string, device_state: string, detail?: string }"
 
 [[requests]]
+request_type = "network.nm.captive.session.start"
+description = "Open an operator-facing captive-portal session that the framework's attach_captive_session_endpoint serves at a same-origin URL on the management HTTPS plane. Plugin allocates a session_id, records the current portal's upstream_host + initial_path + initial_query, initialises an empty jar, and returns the framework-hosted session_url the UI iframes. All upstream HTTP is wlan0-bound via evo-captive-probe — the remote operator's browser never touches the venue. Gated write:network_admin."
+payload_in = "{}"
+payload_out = "{ v:1, status:ok, session_id: string, session_url: string, upstream_host: string, initial_path: string, initial_query: string, expires_at_epoch: u64 }"
+
+[[requests]]
+request_type = "network.nm.captive.upstream.fetch"
+description = "Framework-called upstream fetch on an open captive session. Payload names session_id, HTTP method, path/query, request headers, request body_b64. Plugin resolves upstream_host + path?query, adds the jar's current Cookie, invokes wrapper proxy-fetch, parses response headers (updating the jar from any Set-Cookie), and returns the response bytes for the framework to rewrite Location + strip Set-Cookie + byte-substitute HTML before handing to the operator's browser. Gated write:network_admin."
+payload_in = "{ session_id: string, method: string, path: string, query?: string, headers?: [{name, value}], body_b64?: string }"
+payload_out = "{ v:1, status:ok, http_status: u16, http_status_text: string, headers: [{name, value}], body_b64: string, upstream_host: string, session_id: string }"
+
+[[requests]]
+request_type = "network.nm.captive.session.close"
+description = "Explicit close for an operator-facing captive session. Drops the jar for session_id, re-runs captive_detect (still wlan0-bound), and returns the fresh reachability verdict. Gated write:network_admin."
+payload_in = "{ session_id: string }"
+payload_out = "{ v:1, status:ok, removed: bool, connectivity: object, captive: object }"
+
+[[requests]]
 request_type = "network.refresh_connectivity"
 description = "On-demand connectivity-state refresh; returns freshly published networking.link.connectivity subject value."
 payload_in = "{}"
