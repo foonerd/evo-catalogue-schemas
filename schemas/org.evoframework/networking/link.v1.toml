@@ -128,6 +128,12 @@ payload_in = "{}"
 payload_out = "{ v:1, status:ok|error, disconnected: bool, ifname: string, device_state: string, detail?: string }"
 
 [[requests]]
+request_type = "network.nm.wifi.forget"
+description = "Forget the saved Wi-Fi STA network: delete the `evo-network-wifi-sta` NM connection profile, clear the STA PSK sidecar, blank wifi.sta_ssid in the persisted intent. Distinct from wifi.disconnect (which merely drops the active link). Idempotent: forgetting on a device with no saved profile succeeds cleanly. Gated write:network_admin (paired-operator connect path)."
+payload_in = "{}"
+payload_out = "{ v:1, status:ok, forgotten: bool, steps: [string] }"
+
+[[requests]]
 request_type = "network.nm.captive.session.start"
 description = "Open an operator-facing captive-portal session that the framework's attach_captive_session_endpoint serves at a same-origin URL on the management HTTPS plane. Plugin allocates a session_id, records the current portal's upstream_host + initial_path + initial_query, initialises an empty jar, and returns the framework-hosted session_url the UI iframes. All upstream HTTP is wlan0-bound via evo-captive-probe — the remote operator's browser never touches the venue. Gated write:network_admin."
 payload_in = "{}"
