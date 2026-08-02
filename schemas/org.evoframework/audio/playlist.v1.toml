@@ -161,6 +161,96 @@ to_position: u32 }`. Position past the playlist length
 clamps to end-of-playlist.
 """
 
+[[requests]]
+request_type = "playlist.save_selection"
+description = """
+Server-side selection resolve + write into a stored playlist.
+Mirrors the `queue.enqueue_selection` contract for the playlist
+surface, including the Container-shape selection input.
+
+Payload:
+```
+{
+  "v":             1,
+  "playlist_name": string,
+  "source_id":     string | null,
+  "selection":     SelectionInput,
+  "mode":          "create" | "append",
+  "page":          u32 | null,
+  "page_size":     u32 | null
+}
+```
+
+Two `SelectionInput` shapes are accepted:
+
+1. **Criteria selection** — an MPD-native tag / facet resolve:
+```
+{
+  "dimension": "artist" | "album" | "genre" | "year"
+              | "folder" | "playlist",
+  "value":     string,
+  "parent":    { "tag": string, "value": string } | null
+}
+```
+   The plugin resolves the criteria on-device via the MPD
+   index and writes each matching entry to the target
+   playlist. `source_id`, `page`, `page_size` are ignored.
+
+2. **Container selection** — a paged expansion of a network
+   container:
+```
+{
+  "kind": "container",
+  "uri":  string
+}
+```
+   `source_id` is REQUIRED and names the source registry entry
+   whose owning plugin resolves the container. `page` defaults
+   to 0; `page_size` defaults to 50 with a hard cap of 100.
+   The plugin extracts each leaf item's stable identity
+   (`dlna:<service_id>/<objectId>` for DLNA) and writes THOSE
+   URIs to the playlist — NOT the resolved `http(s)` stream
+   URLs. Stored identities survive server IP / token churn;
+   the enqueue-from-playlist path resolves fresh at play time.
+
+Mode semantics (same for both shapes):
+
+- `create` — clear the playlist before adding (creates it if
+  absent).
+- `append` — add to the existing playlist (creates it if
+  absent).
+
+Response — Criteria shape:
+```
+{
+  "v":                1,
+  "status":           "ok" | "empty",
+  "mode":             string,
+  "kind":             "criteria",
+  "dimension":        string,
+  "playlist_name":    string,
+  "added_uris_count": u32 | null
+}
+```
+
+Response — Container shape:
+```
+{
+  "v":             1,
+  "status":        "ok" | "empty",
+  "mode":          string,
+  "kind":          "container",
+  "playlist_name": string,
+  "added":         u32,
+  "truncated":     bool,
+  "next_page":     u32 | null
+}
+```
+
+Zero-match selections respond with `status: "empty"` and leave
+the playlist intact — no atomic clear on Create.
+"""
+
 [[acceptance]]
 name = "playlist-respondent-cardinality"
 detail = "Only one plugin may claim this shelf at a time. Co-owned with audio.playback / audio.queue / audio.favourites / audio.library by org.evoframework.playback.mpd in the reference distribution."

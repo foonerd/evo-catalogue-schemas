@@ -105,6 +105,14 @@ URIs are accepted regardless of current source state — the
 favourites set carries operator intent; runtime availability
 surfaces via `list_favourites`.
 
+Scheme: the plugin stores whatever string the caller supplies
+verbatim and returns it via `list_favourites` unchanged. Source
+plugins that own an opaque URI scheme (today: DLNA, whose
+stable identity is `dlna:<service_id>/<objectId>`) SHOULD store
+the opaque form so the favourite survives a MediaServer IP or
+token churn; the enqueue-from-favourite path resolves the
+opaque form to a concrete `http(s)` stream at play time.
+
 Returns empty payload; the `audio_favourites` subject's
 update is the fanned-out result.
 """
