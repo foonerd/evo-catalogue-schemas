@@ -107,14 +107,32 @@ Append one or more items to the queue. Payload is
 when non-null the items insert at that position and existing
 items shift right.
 
-Each URI must resolve under a registered library source's
-MPD storage path. URIs that resolve to a source whose current
-state is `Offline` are accepted (the queue carries operator
-intent; availability is a runtime concern); the resulting
-queue items carry `available: false` until the source returns
-(or `null` when the source is still Probing — see the
-`available` field's truth-cascade documentation on
-`queue.get_queue`).
+URI shape is what MPD `add` accepts, verbatim. Two classes
+in scope today:
+
+1. **Library-relative paths** — a path under a registered
+   library source's MPD storage root (`local-internal`,
+   `network-shares/foo`, etc.). MPD resolves against
+   `music_directory` + the source's mount. Legacy local /
+   NAS flow.
+2. **Absolute HTTP(S) URIs** — remote streams. MPD's `add`
+   accepts `http://` / `https://` directly. Used by
+   network-source plugins (DLNA MediaServer client, Track
+   4R §5 §10 successors) that resolve remote catalogue
+   entries to concrete stream URIs before enqueue. The
+   framework verb does NOT gate on URI scheme; the queue
+   handler passes the string to MPD unchanged. Plugins
+   resolving opaque identifiers (e.g. `dlna:` per
+   ADR-0065) MUST resolve to `http(s)` before calling
+   `queue.enqueue` — MPD's playlist has no protocol
+   registry beyond what MPD itself understands.
+
+URIs whose resolving source is `Offline` are accepted (the
+queue carries operator intent; availability is a runtime
+concern); the resulting queue items carry `available: false`
+until the source returns (or `null` when the source is still
+Probing — see the `available` field's truth-cascade
+documentation on `queue.get_queue`).
 
 Returns empty payload; the `audio_queue` subject's update is
 the fanned-out result.
