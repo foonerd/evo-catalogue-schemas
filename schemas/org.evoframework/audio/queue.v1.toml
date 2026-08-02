@@ -117,15 +117,16 @@ in scope today:
    NAS flow.
 2. **Absolute HTTP(S) URIs** — remote streams. MPD's `add`
    accepts `http://` / `https://` directly. Used by
-   network-source plugins (DLNA MediaServer client, Track
-   4R §5 §10 successors) that resolve remote catalogue
-   entries to concrete stream URIs before enqueue. The
-   framework verb does NOT gate on URI scheme; the queue
-   handler passes the string to MPD unchanged. Plugins
-   resolving opaque identifiers (e.g. `dlna:` per
-   ADR-0065) MUST resolve to `http(s)` before calling
-   `queue.enqueue` — MPD's playlist has no protocol
-   registry beyond what MPD itself understands.
+   network-source plugins (DLNA MediaServer client and
+   other remote catalogue front-ends) that resolve remote
+   catalogue entries to concrete stream URIs before
+   enqueue. The framework verb does NOT gate on URI
+   scheme; the queue handler passes the string to MPD
+   unchanged. Plugins resolving opaque identifiers (e.g.
+   `dlna:<service_id>/<objectId>`) MUST resolve to
+   `http(s)` before calling `queue.enqueue` — MPD's
+   playlist has no protocol registry beyond what MPD
+   itself understands.
 
 URIs whose resolving source is `Offline` are accepted (the
 queue carries operator intent; availability is a runtime
@@ -247,6 +248,104 @@ Semantics:
   this verb.
 
 Returns `{ v: 1, status: "ok" }` on success.
+"""
+
+[[requests]]
+request_type = "queue.enqueue_selection"
+description = """
+Server-side selection resolve + enqueue. The UI passes a
+selection input plus a mode; the plugin resolves it against the
+target source on-device and applies the resulting track set
+atomically. No URI list crosses the wire from UI to plugin.
+
+Payload:
+```
+{
+  "v":          1,
+  "source_id":  string | null,
+  "selection":  SelectionInput,
+  "mode":       "append" | "next" | "replace",
+  "page":       u32 | null,
+  "page_size":  u32 | null
+}
+```
+
+Two `SelectionInput` shapes are accepted:
+
+1. **Criteria selection** — an MPD-native tag/facet resolve:
+```
+{
+  "dimension": "artist" | "album" | "genre" | "year"
+              | "folder" | "playlist",
+  "value":     string,
+  "parent":    { "tag": string, "value": string } | null
+}
+```
+   `source_id`, `page`, `page_size` are ignored on this shape;
+   the entire matching set is enqueued in one MPD roundtrip
+   (`findadd` / `searchadd` for tag filters, `add DIR` for
+   folder, one atomic command list for URI-list resolutions).
+
+2. **Container selection** — a paged expansion of a network
+   container (DLNA MediaServer today; extensible to any
+   source that carries opaque container identifiers):
+```
+{
+  "kind": "container",
+  "uri":  string
+}
+```
+   `source_id` is REQUIRED and names the source registry
+   entry whose owning plugin resolves the container. `page`
+   defaults to 0; `page_size` defaults to 50 with a hard cap
+   of 100. A container is NEVER resolved in one unbounded
+   shot; the caller drives subsequent pages via the response's
+   `next_page`.
+
+Mode semantics (same for both shapes):
+
+- `append` — add at the tail of the current queue.
+- `next` — insert after the currently-playing item.
+- `replace` — atomic clear + add + play; on resolve failure
+  the existing queue is left intact.
+
+Response — Criteria shape:
+```
+{
+  "v":                1,
+  "status":           "ok" | "empty",
+  "mode":             string,
+  "kind":             "criteria",
+  "dimension":        string,
+  "added_uris_count": u32 | null
+}
+```
+
+Response — Container shape:
+```
+{
+  "v":         1,
+  "status":    "ok" | "empty",
+  "mode":      string,
+  "kind":      "container",
+  "enqueued":  u32,
+  "truncated": bool,
+  "next_page": u32 | null
+}
+```
+
+`truncated: true` indicates the container has more items past
+the current page; the caller re-issues the verb with `page =
+next_page` and the same mode. Zero-match selections respond
+with `status: "empty"` and leave the queue intact — no atomic
+clear on Replace, no partial append.
+
+Unreachable source, unresolvable container id, or a peer-
+plugin failure surface as structured errors. Transient
+failures (source Offline, peer plugin briefly unavailable)
+carry the retry-eligible classification; permanent failures
+(unknown source_id, unknown selection shape, malformed
+container uri) do not.
 """
 
 # Acceptance rows — invariants the shelf contract pins
