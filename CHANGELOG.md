@@ -7,6 +7,10 @@ versioning follows [Semver](https://semver.org).
 
 ## [Unreleased]
 
+### Added — `audio.library` v1 scan-progress live-emission contract (v0.2.0 candidate)
+
+- `schemas/org.evoframework/audio/library.v1.toml` — expanded the `audio_library_scan_progress` subject description with the full watcher lifecycle: initial `phase = "scanning"` frame within one poll cadence, throttled emission at ~500 ms per frame while `status.updating_db` is `Some(job_id)`, exactly one terminal `phase = "complete"` frame carrying the final counts, sibling `audio_library_sources` + `audio_library_state` republish on terminal, empty envelope after ~2 s settle. Added `phase: "scanning" | "complete"` to the per-entry shape. Added `scan-progress-watcher-emits-throttled-scanning-then-explicit-terminal-frame` acceptance row pinning the emission cadence + terminal-frame discipline (silence after a scan trigger is a substrate defect, never the healthy shape) + the singleton-watcher-gate invariant. No shape bump — additive to the v1 schema. Reference plugin: `org.evoframework.playback.mpd` in evo-device-audio (module `scan_progress.rs`).
+
 ### Added — three missing reference-distribution shelves foot-locked (v0.2.0 candidate)
 
 - `schemas/org.evoframework/audio/terminus.v1.toml` — `audio.terminus` shelf shape 1 (respondent; request_type `get_spectrum_frame`; subject `audio_playback_spectrum_frame`). Post-mixer audio-derived signal surface. Reference plugin: `org.evoframework.audio.terminus` in evo-device-audio (ALSA loopback capture + 256-bin mel-scale FFT + peak-hold + per-band onset detection + L/R correlation; transport-and-leader-gated emission preserves audio floor invariant).

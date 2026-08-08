@@ -472,6 +472,10 @@ name = "scan-progress-subject-only-during-active-scans"
 detail = "The `audio_library_scan_progress` subject is announced on load with empty state `{ v: 1, scans: [] }`. During active scans (MPD `updating_db` field non-zero, or per-source supervisor-driven scan in-flight) the subject's state carries the per-source scan progress; on scan completion the entry is removed and the subject updates. UI consumers read the subject for the live progress; the subject is bounded by the active-scan count which is small (typically 1-2)."
 
 [[acceptance]]
+name = "scan-progress-watcher-emits-throttled-scanning-then-explicit-terminal-frame"
+detail = "Every `library.update_source` verb dispatch that MPD accepts (scan_started = true) MUST cause the plugin to publish at least one initial `phase = \"scanning\"` frame on `audio_library_scan_progress` within one poll cadence (~500 ms) and exactly one terminal `phase = \"complete\"` frame carrying the final counts when MPD's `status.updating_db` returns to `None`. Silence after a scan trigger, with no terminal frame, is a substrate defect — the operator UI must be able to distinguish a stalled scan from a legitimately quiet one. Emission is throttled by a floor cadence (~500 ms per frame) so a fast rescan cannot flood the happenings bus. A process-wide gate in the plugin serialises watcher spawns; concurrent `update_source` gestures fan out one watcher covering the full scan trajectory, not two. On terminal-frame publish the plugin MUST also republish `audio_library_sources` and `audio_library_state` so the settled counts land on the UI without an operator reload; after a brief settle window (~2 s) the empty envelope `{ scans: [] }` republishes so the resting subject state matches the documented idle shape."
+
+[[acceptance]]
 name = "local-internal-source-is-non-removable"
 detail = "The plugin registers the local-internal source automatically at plugin load (using the operator-configured `music_directory` from /etc/mpd.conf as the mount path; default `/var/lib/evo/music/INTERNAL`). `library.remove_source` refuses on the local-internal source's id with a structured Permanent error. The local-internal source is the device's floor library; making it removable would create an empty-library state with no recovery path."
 
@@ -577,9 +581,12 @@ client-side aggregate) and subscribe for live updates.
 addressing = { scheme = "evo.audio.library", value = "scan_progress" }
 subject_type = "audio_library_scan_progress"
 description = """
-Live per-source scan progress. Only updates during active
-scans; outside of active scans the subject's state is
-empty (`{ v: 1, scans: [] }`).
+Live per-source scan progress. Announced with the empty
+envelope (`{ v: 1, scans: [] }`) at plugin load; republished
+on every scan trigger — the `library.update_source` verb
+spawns a per-scan watcher that polls MPD `status.updating_db`
+at a throttled cadence (~500 ms) and emits a frame per
+poll while the field is `Some(<job_id>)`.
 
 Payload shape (v1):
 
@@ -594,24 +601,65 @@ Where each ScanProgress is:
 
 ```
 {
-  "source_id":            string,
-  "kind":                 "update" | "rescan",
-  "started_at_ms":        u64,
-  "scanned_tracks":       u32,
-  "estimated_total":      u32 | null,
-  "current_relative_path": string | null
+  "source_id":             string,
+  "kind":                  "update" | "rescan",
+  "started_at_ms":         u64,
+  "scanned_tracks":        u32,
+  "estimated_total":       u32 | null,
+  "current_relative_path": string | null,
+  "phase":                 "scanning" | "complete"
 }
 ```
 
-`estimated_total` is null for incremental updates (MPD does
-not report a total ahead of time); populated for explicit
-rescan when the plugin pre-walks the source's directory tree.
-`current_relative_path` is the source-relative path of the
-file MPD is currently reading (may be null between files).
+`scanned_tracks` is MPD's `stats.songs` at poll time. For
+`kind = "update"` it is monotonic (MPD only adds new tracks);
+for `kind = "rescan"` it MAY transiently decrease as MPD
+prunes stale entries before adding replacements — the value
+still reflects wire truth at each poll and the terminal
+frame carries the final count.
 
-UI consumers render a progress bar driven by `scanned_tracks
-/ estimated_total` when both fields are non-null; otherwise
-render an indeterminate indicator.
+`estimated_total` is populated by a best-effort filesystem
+walk of the source's mount path at scan start (bounded to
+~30 s wall-clock). `null` when the walk cannot complete
+within budget (large NAS mounts, permission-degraded trees)
+— UI renders indeterminate progress rather than a wrong
+denominator.
+
+`current_relative_path` is `null` in the current wire; MPD's
+scan protocol does not expose the file-under-scan and the
+plugin does not synthesise one to keep the wire honest.
+
+`phase` names the scan lifecycle position. The watcher
+guarantees exactly one terminal frame per scan carrying
+`phase = "complete"` and the final counts — the operator UI
+keys on this to settle its `N of M` render without a reload.
+Silence after a scan trigger, with no terminal frame, is a
+substrate failure (never the healthy shape).
+
+Full watcher lifecycle:
+
+1. Announce (plugin load): `{ scans: [] }` — idle.
+2. `library.update_source` fires: spawn a watcher with
+   `source_id` + `kind`.
+3. Watcher's first tick emits
+   `{ scans: [{ source_id, kind, started_at_ms,
+   scanned_tracks: 0, estimated_total: <best-effort>,
+   phase: "scanning", current_relative_path: null }] }`.
+4. Subsequent ticks (~500 ms) emit the same shape with
+   `scanned_tracks` updated to `stats.songs`.
+5. When MPD reports `updating_db = None`, watcher emits the
+   terminal frame with `phase = "complete"` carrying the
+   final counts; then republishes `audio_library_sources` +
+   `audio_library_state` so the settled totals land without
+   a UI reload; after ~2 s the empty envelope
+   `{ scans: [] }` publishes so the resting state matches
+   the documented idle shape.
+
+Consumers subscribe to the subject via `subscribe_subject`
+or observe the corresponding `SubjectStateChanged`
+happening via `subscribe_happenings`. A process-wide gate
+in the plugin serialises watcher spawns — two concurrent
+`update_source` gestures fan out one watcher, not two.
 """
 
 [[subjects]]
