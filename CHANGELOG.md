@@ -7,6 +7,10 @@ versioning follows [Semver](https://semver.org).
 
 ## [Unreleased]
 
+### Added — `audio.library` v1 triage substrate (v0.2.0 candidate)
+
+- `schemas/org.evoframework/audio/library.v1.toml` — added two `library.get_triage` / `library.reconcile_triage` request declarations, the `audio_library_triage` subject declaration under `[[subjects]]` with the full envelope + TriageFinding shape + wave-1 class-key catalogue, and one `library-triage-subject-published-on-load-and-every-sweep` acceptance row. No shape bump — additive to the v1 schema. Reference plugin: `org.evoframework.playback.mpd` in evo-device-audio (module `library_triage.rs` + living inventory `plugins/org.evoframework.playback.mpd/docs/LIBRARY-TRIAGE.md`).
+
 ### Filled in — `audio.playback` v1 contract closures (v0.2.0 candidate)
 
 - `schemas/org.evoframework/audio/playback.v1.toml` — replaced the earlier `course_correct_verbs = ["tbd-review"]` placeholder with the documented contract from the reference plugin `org.evoframework.playback.mpd`: seven verbs (`play`, `pause`, `stop`, `next`, `previous`, `seek`, `set_volume`) with per-verb `payload_in` / `payload_out` shapes, plus two additional acceptance criteria covering payload-versioning-by-encoding and set_volume clamping. No shape bump — the v1 schema's verb list and payload contracts were always meant to be filled in once the reference plugin's contract stabilised; this is the closure of that placeholder.

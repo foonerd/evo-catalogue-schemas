@@ -386,6 +386,61 @@ does not match any work in the current aggregate, the verb
 returns a structured Permanent error (`unknown_work_id`).
 """
 
+[[requests]]
+request_type = "library.get_triage"
+description = """
+Read-only snapshot of the plugin's most recent library-triage
+sweep. Payload is the empty object `{}`.
+
+Returns the current `audio_library_triage` envelope
+(`{ v: 1, findings: [TriageFinding...], auto_reconciled_count:
+u32, prompt_required_count: u32, last_run_at_ms: u64 }`) as of
+the sweep that populated the shared subject mirror. No MPD
+round-trip; the read is cheap enough for a UI panel-open to
+call without special treatment.
+
+Each `TriageFinding` is `{ class: string, severity: string,
+description: string, auto_reconciled: bool,
+reconciled_at_ms: u64 | null, evidence: object }`. The `class`
+is a stable snake-case key naming one drift class the plugin
+detects (`mpd_db_empty_but_music_present`,
+`registry_count_diverges`, `curation_carries_gone_uris` in the
+wave-1 set); UIs key on it for localised copy. `severity` is
+one of `info | warn | critical`. `auto_reconciled` is `true`
+when the sweep fired the class's safe reconcile action
+successfully; `reconciled_at_ms` carries the wall-clock ms of
+that completion when `auto_reconciled` is `true`, otherwise
+`null`. `evidence` is a class-specific structured blob used for
+the diagnostics / audit surface.
+
+`last_run_at_ms` is the wall-clock ms of the last sweep. Zero
+before any sweep has run.
+"""
+
+[[requests]]
+request_type = "library.reconcile_triage"
+description = """
+Re-run the plugin's library-triage sweep, fire every safe
+reconcile action the sweep classifies, and republish the
+`audio_library_triage` subject. Payload is the empty object
+`{}`.
+
+Returns the resulting envelope in the same shape as
+`library.get_triage`. Distinct from that verb in that this
+verb performs the sweep (MPD `listallinfo` + `stats`
+round-trips, plus each class's reconcile action) before
+returning; the returned envelope reflects the post-sweep
+state, not the pre-sweep cache.
+
+Concurrency: a process-wide gate serialises concurrent sweep
+passes. When a sweep is already in flight, this verb returns
+the current pre-sweep cache unchanged rather than queuing.
+Operators calling this verb during a warm-start or an idle
+`Database` / `Update` burst will see the sweep-in-flight envelope;
+the next call after the concurrent sweep completes returns the
+fresh state.
+"""
+
 # ----- Acceptance rows -----
 
 [[acceptance]]
@@ -444,7 +499,9 @@ detail = "Every BrowseEntry of kind `file` MUST project the 13 classical-music m
 name = "library-browse-file-carries-artwork-url"
 detail = "Every BrowseEntry of kind `file` MUST carry an `artwork_url` field of shape `/api/v1/audio/artwork?scheme=mpd-path&value=<url-encoded uri>`. Directory and playlist BrowseEntry kinds do NOT carry artwork_url (the operator UI's directory / playlist tiles render via different artwork-resolution surfaces — directory artwork resolves to the first track's cover; playlist tiles render generic icons). The URL is target-addressed; UI consumers append `&size=...` per their render target. Percent-encoding follows RFC 3986 unreserved-set rules. See `audio.playback.v1` acceptance row `now-playing-track-carries-artwork-url` for the full cascade contract."
 
-# ----- Subjects -----
+[[acceptance]]
+name = "library-triage-subject-published-on-load-and-every-sweep"
+detail = "The plugin announces the `audio_library_triage` subject on load with an empty envelope (`v: 1, findings: [], auto_reconciled_count: 0, prompt_required_count: 0, last_run_at_ms: 0`). Every warm-start rehydrate and every idle `Database` / `Update` burst runs the drift-classifier sweep and republishes the subject with the current findings list, auto-reconcile counts, and last-run timestamp. The operator-triggered `library.reconcile_triage` verb also runs the sweep and republishes. Wave-1 drift classes are `mpd_db_empty_but_music_present`, `registry_count_diverges`, and `curation_carries_gone_uris`; all three are safe-auto-reconcile (no operator gesture required). New drift classes land as new classifier arms + one row in the plugin's living inventory (`LIBRARY-TRIAGE.md`) + one row in this schema; classifier arms without matching schema rows are defects."
 
 [[subjects]]
 addressing = { scheme = "evo.audio.library", value = "sources" }
@@ -555,4 +612,74 @@ file MPD is currently reading (may be null between files).
 UI consumers render a progress bar driven by `scanned_tracks
 / estimated_total` when both fields are non-null; otherwise
 render an indeterminate indicator.
+"""
+
+[[subjects]]
+addressing = { scheme = "evo.audio.library", value = "triage" }
+subject_type = "audio_library_triage"
+description = """
+Operator-visible drift-detection substrate for the library
+plane. Announced on load with an empty envelope; republished
+on every warm-start rehydrate, every idle
+`Database` / `Update` burst, and every operator-triggered
+`library.reconcile_triage` sweep.
+
+Payload shape (v1):
+
+```
+{
+  "v":                      1,
+  "findings":               [TriageFinding...],
+  "auto_reconciled_count":  u32,
+  "prompt_required_count":  u32,
+  "last_run_at_ms":         u64
+}
+```
+
+Where each TriageFinding is:
+
+```
+{
+  "class":              string,     // one of the stable class keys below
+  "severity":           string,     // "info" | "warn" | "critical"
+  "description":        string,     // one-line operator-visible summary
+  "auto_reconciled":    bool,       // true when this sweep fired the safe reconcile action
+  "reconciled_at_ms":   u64 | null, // wall-clock ms of reconcile completion; null when auto_reconciled is false
+  "evidence":           object      // class-specific diagnostics blob
+}
+```
+
+Wave-1 class keys (stable, snake-case):
+
+- `mpd_db_empty_but_music_present` — files present under
+  the plugin's `music_directory` on disk but MPD's
+  `listallinfo` returns no `File` entries. Safe auto-
+  reconcile: `mpc update` on the full DB.
+- `registry_count_diverges` — the source registry's
+  persisted `track_count` for the floor source disagrees
+  with MPD's `stats.songs` wire truth. Safe auto-reconcile:
+  apply wire truth + persist + republish
+  `audio_library_state`.
+- `curation_carries_gone_uris` — one or more URIs in the
+  queue, favourites, or a stored playlist classify as Gone
+  (absent from `listallinfo` under a reachable Online /
+  Degraded source). Safe auto-reconcile: prune from every
+  affected curation store and refresh the queue /
+  favourites / playlist-index subjects.
+
+All wave-1 classes are safe-auto-reconcile. Future classes
+whose reconcile action requires an operator gesture publish
+with `auto_reconciled: false` and a non-empty
+`prompt_required_count`; the `library.reconcile_triage`
+verb fires the safe classes and returns the envelope with
+the prompt-required set intact for operator confirmation.
+
+`last_run_at_ms` is the wall-clock ms of the last sweep
+completion; zero before any sweep has run.
+
+UI consumers subscribe to this subject for the operator-
+visible triage panel (list of findings with per-row
+severity, description, and reconcile timestamp). The
+`library.get_triage` read verb returns the same envelope
+without triggering a sweep.
 """
