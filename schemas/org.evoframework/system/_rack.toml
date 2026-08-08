@@ -30,3 +30,7 @@ current_shape = 1
 [[shelves]]
 name = "notifications"
 current_shape = 1
+
+[[shelves]]
+name = "kiosk"
+current_shape = 1

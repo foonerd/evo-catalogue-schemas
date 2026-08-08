@@ -41,3 +41,31 @@ current_shape = 2
 [[shelves]]
 name = "multiroom"
 current_shape = 1
+
+[[shelves]]
+name = "queue"
+current_shape = 1
+
+[[shelves]]
+name = "playlist"
+current_shape = 1
+
+[[shelves]]
+name = "favourites"
+current_shape = 1
+
+[[shelves]]
+name = "library"
+current_shape = 1
+
+[[shelves]]
+name = "delivery"
+current_shape = 2
+
+[[shelves]]
+name = "dlna"
+current_shape = 1
+
+[[shelves]]
+name = "terminus"
+current_shape = 1

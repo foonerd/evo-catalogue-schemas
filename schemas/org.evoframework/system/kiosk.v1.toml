@@ -1,0 +1,247 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Just a Nerd
+
+# Schema for the `system.kiosk` shelf at shape version 1.
+#
+# Kiosk shelves host the operator-facing on-glass display
+# controls: rotation, touch calibration, enable / disable,
+# brightness, sleep timeout, sleep inhibition, and a
+# read-back of the current display state. The shelf is
+# respondent-shaped: every operator gesture from the on-
+# glass Settings surface dispatches as a request, and each
+# writer verb requires the `system_admin` capability scope.
+#
+# Reference plugin: `org.evoframework.system.kiosk` in
+# evo-device-audio. The plugin owns the compositor overlay
+# state (persisted so restarts pick up operator choices),
+# the systemd unit for the compositor + browser, the
+# brightness backlight control (writes to the sysfs
+# backlight node), the sleep-timeout inhibit lock, and a
+# trigger-file protocol for launching the on-glass touch
+# calibration wizard.
+#
+# The reactive-only lifecycle mode reflects that the plugin
+# does not own long-running compute — every verb is a
+# short-lived config edit + apply. Restart-on-crash restores
+# the plugin without dropping operator gestures in flight
+# beyond the crash boundary.
+
+schema_version = 1
+rack = "system"
+shelf = "kiosk"
+shape = 1
+
+description = """
+On-glass kiosk display controls. The reference plugin
+persists every operator choice to the compositor overlay
+config (rotation, touch calibration matrix, brightness,
+sleep timeout, sleep-inhibit-while-playing), applies the
+change immediately via the corresponding runtime path
+(compositor SIGHUP, backlight sysfs write, systemctl
+start/stop, systemd-logind inhibitor), and returns the
+applied state so the operator UI can render the new value
+without a follow-up read.
+
+The eight-verb surface covers the on-glass Settings screen
+plus the touch-calibration launch bridge (which touches a
+well-known trigger file the compositor watches; the
+compositor picks up the file, runs the calibration wizard
+overlay, and rewrites the touch matrix on completion). The
+plugin never blocks on the wizard — the launch verb returns
+once the trigger is written; wizard completion is out-of-
+band via subsequent `set_touch_calibration` calls the
+compositor makes back to this plugin.
+
+Sleep-inhibit-while-playing is a two-layer coordination:
+this plugin owns the operator-visible flag; the plugin's
+subject-subscription surface watches
+`audio_playback_now_playing.transport_state` and toggles a
+systemd-logind inhibitor lock on every playing / stopped
+transition when the flag is on. The lock ensures the
+device does not sleep mid-track while the user is
+listening. The plugin uses `subscribe_subjects = true` in
+its manifest to earn the `SubjectStateSubscriber` handle
+this coordination requires.
+"""
+
+# ----- Request types -----
+
+[[requests]]
+request_type = "set_display_rotation"
+description = """
+Set the compositor display rotation. Payload is
+`{ rotation: string }` where `rotation` is one of
+`"normal" | "left" | "right" | "inverted"` (mirroring the
+Wayland output transform names).
+
+Returns `{ ok: true, rotation: string }` with the applied
+rotation (same as the input on success). Persists the
+rotation to the compositor overlay config atomically before
+returning; the compositor picks up the new value on its
+next config reload (SIGHUP-triggered by the plugin).
+
+Requires the `system_admin` capability scope — declared on
+the manifest's `verb_capabilities` map.
+"""
+
+[[requests]]
+request_type = "set_touch_calibration"
+description = """
+Set the touch overlay calibration matrix. Payload is
+`{ rotation: string, hflip: bool?, vflip: bool? }` where
+`rotation` names the touch-input rotation (independent of
+the display rotation — touchscreens rotate their input
+axes separately from the display), and `hflip` / `vflip`
+mirror the input axes (default `false` for both).
+
+Returns `{ ok: true, rotation: string, hflip: bool,
+vflip: bool }` with the applied triple. Persists to the
+compositor overlay config atomically; the compositor
+applies the new matrix on its next config reload.
+
+Requires the `system_admin` capability scope.
+"""
+
+[[requests]]
+request_type = "launch_touch_calibration"
+description = """
+Launch the on-glass touch-calibration wizard. Payload is
+`{}` (reserved-shape optional fields are accepted but
+ignored in this cut).
+
+Returns `{ ok: true, trigger: string }` where `trigger` is
+the path of the trigger file the plugin wrote for the
+compositor. The compositor's file-watcher picks up the
+trigger, runs the calibration wizard as a full-screen
+overlay, captures the four-point sample set, computes the
+correction matrix, and rewrites the touch calibration via
+a subsequent `set_touch_calibration` call back to this
+plugin.
+
+The verb returns as soon as the trigger is written; wizard
+completion is asynchronous and observable via the
+`system_kiosk_display_state` subject's touch calibration
+fields updating when the wizard finishes. This decouples
+the operator gesture from the wizard duration.
+
+Requires the `system_admin` capability scope.
+"""
+
+[[requests]]
+request_type = "set_enabled"
+description = """
+Enable or disable the on-glass kiosk. Payload is
+`{ enabled: bool }`.
+
+Returns `{ ok: true, enabled: bool, unit_active: bool }`
+where `enabled` is the persisted operator-visible flag and
+`unit_active` is the compositor systemd unit's active-state
+after the apply. The plugin persists the operator flag
+first (so a subsequent UI read reflects the intended state
+even if the systemctl call is slow), then dispatches
+`systemctl start / stop <compositor-unit>`. If the
+systemctl call fails the flag is rolled back to the
+pre-request value so the persisted state does not lie
+about the runtime.
+
+Requires the `system_admin` capability scope.
+"""
+
+[[requests]]
+request_type = "set_brightness"
+description = """
+Set the display backlight brightness. Payload is
+`{ percent: u8 }` where `percent` is in `[0, 100]`. Values
+outside the range are refused with Permanent.
+
+Returns `{ ok: true, percent: u8, raw: u32, max: u32 }`
+where `percent` is the applied percent, `raw` is the value
+the plugin wrote to the sysfs backlight `brightness` node,
+and `max` is the platform-reported `max_brightness` value
+used to scale `percent -> raw` for the operator's
+diagnostic surface.
+
+The write is direct-to-sysfs; the compositor is not
+involved. The plugin's persisted overlay carries `percent`
+so a reboot restores the operator's last brightness.
+
+Requires the `system_admin` capability scope.
+"""
+
+[[requests]]
+request_type = "set_sleep_timeout"
+description = """
+Set the compositor's idle-to-sleep timeout in seconds.
+Payload is `{ seconds: u32 }`; `seconds = 0` disables the
+timeout entirely (the display never sleeps on idle).
+
+Returns `{ ok: true, seconds: u32 }` with the applied
+value. Persists to the compositor overlay config; the
+compositor picks it up on next config reload.
+
+Requires the `system_admin` capability scope.
+"""
+
+[[requests]]
+request_type = "set_sleep_inhibit_while_playing"
+description = """
+Enable or disable the sleep-inhibit-while-playing
+coordination. Payload is `{ enabled: bool }`.
+
+Returns `{ ok: true, enabled: bool, currently_inhibited:
+bool }` where `enabled` is the persisted operator flag and
+`currently_inhibited` reflects whether the plugin holds a
+systemd-logind inhibitor lock at this moment (only true
+when `enabled == true` AND the last observed
+`audio_playback_now_playing.transport_state` was
+`"playing"`). Toggling `enabled` off releases any held
+inhibitor immediately; toggling `enabled` on installs the
+inhibitor if the transport is currently playing.
+
+Requires the `system_admin` capability scope.
+"""
+
+[[requests]]
+request_type = "get_display_state"
+description = """
+Read the current display state. Payload MUST be the empty
+object `{}` (a non-empty payload is refused with Permanent
+so a future writer cannot slip through as a read).
+
+Returns `{ v: 1, enabled: bool, unit_active: bool,
+rotation: string, touch_rotation: string, touch_hflip:
+bool, touch_vflip: bool, brightness_percent: u8,
+sleep_timeout_seconds: u32, sleep_inhibit_while_playing:
+bool, currently_inhibited: bool }`.
+
+This is the read-back the operator UI's Settings screen
+calls once on connect to seed every widget. Live updates
+come via the `system_kiosk_display_state` subject rather
+than polling this verb.
+"""
+
+# ----- Acceptance rows -----
+
+[[acceptance]]
+name = "kiosk-respondent-cardinality"
+detail = "Only one plugin may claim the `system.kiosk` shelf at a time. The reference implementation is `org.evoframework.system.kiosk` in the audio distribution."
+
+[[acceptance]]
+name = "kiosk-writer-verbs-require-system-admin-scope"
+detail = "Every writer verb (`set_display_rotation`, `set_touch_calibration`, `launch_touch_calibration`, `set_enabled`, `set_brightness`, `set_sleep_timeout`, `set_sleep_inhibit_while_playing`) MUST require the `system_admin` capability scope declared via the manifest's `[capabilities.respondent.verb_capabilities]` map. The read verb `get_display_state` MUST NOT require the scope — the operator UI's Settings screen renders the current state on connect for every authenticated principal, even before elevation. Reviewers reject changes that move the capability boundary."
+
+[[acceptance]]
+name = "kiosk-persist-before-apply-on-write-verbs"
+detail = "Write verbs MUST persist the operator-visible flag to the compositor overlay config BEFORE dispatching the runtime apply (systemctl call, backlight sysfs write, inhibitor install). If the runtime apply fails the plugin MUST roll back the persisted flag to the pre-request value so a subsequent read does not lie about the runtime state. This closes the class where the UI would render the intended value while the runtime remains at the prior state."
+
+[[acceptance]]
+name = "kiosk-launch-touch-calibration-is-async"
+detail = "`launch_touch_calibration` MUST return as soon as the trigger file is written; the wizard's on-glass duration MUST NOT block the verb. Wizard completion is observable via `set_touch_calibration` calls the compositor issues back to this plugin (and via the `system_kiosk_display_state` subject's touch-calibration fields updating). This preserves operator gesture safety — the UI's Settings screen does not lock up while the wizard runs."
+
+[[acceptance]]
+name = "kiosk-sleep-inhibit-coordination-tracks-transport"
+detail = "When `sleep_inhibit_while_playing == true`, the plugin MUST install a systemd-logind inhibitor lock on `audio_playback_now_playing.transport_state` transitions to `\"playing\"` and MUST release the lock on transitions to `\"stopped\"` / `\"paused\"`. The plugin uses the `SubjectStateSubscriber` capability declared via manifest `subscribe_subjects = true` to observe transitions. Toggling the operator flag off MUST release any held inhibitor immediately regardless of transport state."
+
+[[acceptance]]
+name = "kiosk-brightness-percent-clamp"
+detail = "`set_brightness` MUST refuse `percent > 100` with Permanent. The plugin scales `percent -> raw` using the platform-reported `max_brightness` value at write time; the response carries `raw` + `max` alongside `percent` so the operator UI's diagnostic surface can display the actual sysfs write value. The plugin MUST NOT attempt to write above the platform maximum."

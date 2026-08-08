@@ -7,6 +7,14 @@ versioning follows [Semver](https://semver.org).
 
 ## [Unreleased]
 
+### Added — three missing reference-distribution shelves foot-locked (v0.2.0 candidate)
+
+- `schemas/org.evoframework/audio/terminus.v1.toml` — `audio.terminus` shelf shape 1 (respondent; request_type `get_spectrum_frame`; subject `audio_playback_spectrum_frame`). Post-mixer audio-derived signal surface. Reference plugin: `org.evoframework.audio.terminus` in evo-device-audio (ALSA loopback capture + 256-bin mel-scale FFT + peak-hold + per-band onset detection + L/R correlation; transport-and-leader-gated emission preserves audio floor invariant).
+- `schemas/org.evoframework/audio/dlna.v1.toml` — `audio.dlna` shelf shape 1 (respondent; 5 request_types covering `source.dlna.refresh` / `source.dlna.list` / `source.dlna.browse` / `source.dlna.resolve` / `play_now`). UPnP AV MediaServer discovery + ContentDirectory browse + DIDL-to-stream-URI resolution. Reference plugin: `org.evoframework.source.dlna` in evo-device-audio (SSDP discovery with 10-minute grace window; persistent discovered-server state; `dlna` URI scheme owner).
+- `schemas/org.evoframework/system/kiosk.v1.toml` — `system.kiosk` shelf shape 1 (respondent; 8 request_types covering display rotation / touch calibration / launch-wizard / enable / brightness / sleep-timeout / sleep-inhibit-while-playing / read-back). On-glass kiosk display controls with `system_admin`-scoped writer verbs; persist-before-apply discipline with rollback on apply failure; async wizard-launch bridge. Reference plugin: `org.evoframework.system.kiosk` in evo-device-audio.
+- `schemas/org.evoframework/audio/_rack.toml` — enumerate every audio shelf schema present in the directory (queue, playlist, favourites, library, delivery, dlna, terminus) alongside the four pre-existing entries. Rack manifest was missing seven shelves it already housed schemas for.
+- `schemas/org.evoframework/system/_rack.toml` — add `kiosk` alongside `power` and `notifications`.
+
 ### Added — `audio.library` v1 triage substrate (v0.2.0 candidate)
 
 - `schemas/org.evoframework/audio/library.v1.toml` — added two `library.get_triage` / `library.reconcile_triage` request declarations, the `audio_library_triage` subject declaration under `[[subjects]]` with the full envelope + TriageFinding shape + wave-1 class-key catalogue, and one `library-triage-subject-published-on-load-and-every-sweep` acceptance row. No shape bump — additive to the v1 schema. Reference plugin: `org.evoframework.playback.mpd` in evo-device-audio (module `library_triage.rs` + living inventory `plugins/org.evoframework.playback.mpd/docs/LIBRARY-TRIAGE.md`).

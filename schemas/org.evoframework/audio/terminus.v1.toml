@@ -1,0 +1,130 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Just a Nerd
+
+# Schema for the `audio.terminus` shelf at shape version 1.
+#
+# Terminus shelves host the post-mixer audio-derived signal
+# surface — the framework-canonical place for spectrum FFT,
+# loudness telemetry, and any future forward-decade consumer
+# of the ALSA loopback tap on `pcm.evo`. The shelf is
+# respondent-shaped: operator-visible reads (`get_spectrum_frame`
+# today, loudness / fingerprint / transcription tomorrow)
+# dispatch as requests; the live spectrum state is published
+# as the `audio_playback_spectrum_frame` subject for read-then-
+# subscribe consumers.
+#
+# Reference plugin: `org.evoframework.audio.terminus` in
+# evo-device-audio. The plugin owns the ALSA loopback capture
+# (the snd-aloop capture side of the pcm.evo tee), the FFT
+# compute, and the transport / multi-room gating that decides
+# when to emit frames.
+#
+# Cadence is ALSA-paced (~47 Hz at the canonical 48 kHz /
+# 1024-point FFT chain); the wire `rate_hz` field on every
+# emitted frame carries the value subscribers actually
+# receive at so they can drive their render loop off the
+# subject rather than an assumed cadence.
+
+schema_version = 1
+rack = "audio"
+shelf = "terminus"
+shape = 1
+
+description = """
+Post-mixer audio-derived signal surface. The reference plugin
+taps the `pcm.evo` ALSA loopback and computes a 256-bin
+mel-scale stereo Float32 FFT with peak-hold per bin,
+per-band onset event detection, and L/R correlation for
+stereo-imaging visualisations. The compute cadence is ALSA-
+paced (one FFT per `FFT_SIZE` samples drawn at the
+configured sample rate — ~47 Hz on the canonical
+48 kHz / 1024-point chain).
+
+Emission is gated on the `audio_playback_now_playing`
+subject's `transport_state == "playing"` and on the local
+device being the leader of any active multi-room group (or
+being a solo device with no active group). Stopped / paused
+sends no frames; followers do not publish a parallel
+spectrum subject under the same name.
+
+Failure semantics are permissive: ALSA capture-open failure
+at admit lets the plugin admit cleanly with no frames
+(operator sees the cause via `health_check`); capture-loop
+transport errors trigger a bounded reconnect loop and the
+plugin reports unhealthy only on retry exhaustion. The
+audio floor invariant is preserved — terminus health does
+not affect the primary playback path.
+"""
+
+# ----- Request types -----
+
+[[requests]]
+request_type = "get_spectrum_frame"
+description = """
+Return the current spectrum frame — the first-render parity
+surface. Payload is the empty object `{}`.
+
+Returns the same envelope shape as the
+`audio_playback_spectrum_frame` subject: `{ v: 1, rate_hz:
+u32, ts_ms: u64, bins: u32, left: [f32...], right: [f32...],
+peak_hold_left: [f32...], peak_hold_right: [f32...],
+onsets: OnsetFlags, correlation: [f32...] }`. `bins` is the
+constant number of FFT bins (256 in the reference chain);
+each of the six per-bin arrays has exactly `bins` entries.
+
+Frame values are in `[0.0, 1.0]` after the perceptual
+scaling pass. `peak_hold_left` / `peak_hold_right` carry the
+decayed per-bin peaks so UI consumers can render a peak-hold
+overlay without maintaining their own decay state.
+`onsets` is a per-band flag set (`sub_bass`, `bass`, `mid`,
+`high`) — each `bool` fires true on the frame where the band
+crossed its detection threshold. `correlation` carries the
+per-bin L/R correlation coefficient for stereo-imaging
+visualisations.
+
+Consumers subscribing to the subject typically call this
+verb once on connect to seed their render loop, then let
+subject updates drive the frame stream. Callers connecting
+during a stopped / paused transport receive the empty-frame
+envelope (all arrays present with zeroes) rather than an
+error, mirroring the truth-or-null wire discipline.
+"""
+
+# ----- Subjects -----
+
+[[subjects]]
+addressing = { scheme = "evo.audio.playback", value = "spectrum_frame" }
+subject_type = "audio_playback_spectrum_frame"
+description = """
+Live spectrum frame. Republished at the ALSA-paced FFT
+cadence when the transport is playing and the local device
+is the group leader (or solo). Envelope shape mirrors the
+`get_spectrum_frame` verb response.
+
+Consumers use the read-then-subscribe pattern: `get_spectrum_frame`
+once on connect for the initial frame, subscribe to this
+subject for the live stream. Cross-shelf addressing
+(`evo.audio.playback:spectrum_frame`) reflects the shelf-of-
+consumption (audio.playback for the operator UI) even though
+the shelf-of-production is `audio.terminus` — the plugin
+carries the burden of the cross-shelf composition so
+consumers do not have to know the terminus shelf exists.
+"""
+
+# ----- Acceptance rows -----
+
+[[acceptance]]
+name = "terminus-respondent-cardinality"
+detail = "Only one plugin may claim the `audio.terminus` shelf at a time. The reference implementation is `org.evoframework.audio.terminus` in the audio distribution."
+
+[[acceptance]]
+name = "terminus-emission-gated-on-transport-and-leader"
+detail = "Frame emission MUST be silent unless BOTH `audio_playback_now_playing.transport_state == \"playing\"` AND the local device is the leader of any active multi-room group (or no group is active). Followers MUST NOT emit a parallel `audio_playback_spectrum_frame` subject. The capture loop MUST continue running through paused / stopped transitions so a resume picks up at the next tick without spawn latency."
+
+[[acceptance]]
+name = "terminus-audio-floor-invariant"
+detail = "Terminus plugin health MUST NOT affect the primary playback path. ALSA capture-open failure at admit, capture-loop transport errors, and reconnect-loop exhaustion are all local to the plugin's health — the primary `pcm.evo -> hw:CARD=<dac>` path continues unaffected. A `health_check` report of unhealthy on terminus never surfaces as a playback fault."
+
+[[acceptance]]
+name = "terminus-get-spectrum-frame-first-render-parity"
+detail = "The `get_spectrum_frame` read verb MUST return the same envelope shape the subject publishes, including on quiet transports (stopped / paused). The empty-frame shape (all six per-bin arrays populated with zeroes; `onsets` all-false; `ts_ms` = 0) is a valid return, not an error. This preserves first-render parity: a UI panel subscribing to the subject and calling this verb once on connect renders the same shape whether audio is playing or not."

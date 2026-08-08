@@ -1,0 +1,208 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Just a Nerd
+
+# Schema for the `audio.dlna` shelf at shape version 1.
+#
+# DLNA shelves host the UPnP AV / DLNA MediaServer surface —
+# LAN discovery, per-server ContentDirectory browsing, DIDL
+# object resolution, and the play-now bridge that hands
+# resolved streaming URIs to the playback warden. The shelf
+# is respondent-shaped: every operator gesture against a
+# discovered server (refresh the LAN list, list known
+# servers, browse a server's tree, resolve one object,
+# play-now against a `dlna:<service>/<object>` URI)
+# dispatches as a request.
+#
+# Reference plugin: `org.evoframework.source.dlna` in
+# evo-device-audio. The plugin owns the SSDP discovery loop,
+# the per-server MediaServer description fetch cache, the
+# ContentDirectory Browse SOAP calls, and the DIDL parse
+# that converts raw upstream XML into the wire-typed
+# BrowseEntry / ResolvedObject shape the operator UI
+# consumes.
+#
+# URI scheme ownership. The `dlna` URI scheme is owned by
+# this plugin. `dlna:<service_id>/<object_id>` is the
+# canonical identity form; `service_id` is the UPnP UDN
+# (typically `uuid:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`);
+# `object_id` is the DIDL object id under that server's
+# ContentDirectory tree. The first `/` after the scheme
+# terminates the service_id because UDNs themselves may
+# contain `:`.
+
+schema_version = 1
+rack = "audio"
+shelf = "dlna"
+shape = 1
+
+description = """
+DLNA / UPnP AV MediaServer surface. The reference plugin
+runs a bounded SSDP discovery sweep (3 s M-SEARCH timeout),
+merges the discovered set into a persisted state file
+(`/var/lib/evo/state/org.evoframework.source.dlna/discovered.json`)
+with a 10-minute grace window for transient absences, and
+serves ContentDirectory Browse requests against the LAN-
+resolved servers on operator demand.
+
+Discovery cadence is operator-triggered (`source.dlna.refresh`)
+plus a fixed periodic sync in the plugin's background loop.
+Every discovered server carries `service_id`, `friendly_name`,
+`control_url`, `base_url`, `location`, and
+`last_seen_ms`; the plugin retains a server across up to 10
+minutes of missing SSDP responses so a MediaServer that
+briefly drops off the LAN does not immediately vanish from
+the operator's Sources panel.
+
+Browse pagination is bounded by `DLNA_PAGE_HARD_CAP` (the
+plugin clamps operator-supplied `page_size` into
+`[1, hard_cap]`); pages carry the standard `entries` list
+plus a `next_page` sentinel that the operator UI drives its
+infinite-scroll off.
+
+Play-now is a bridge: the plugin resolves the DIDL object,
+picks the best-fit `res` element (the plugin's ranker
+prefers native-uncompressed formats, then progressive HTTP
+over range-supporting transport, then RTP/TCP), and hands
+the resulting streaming URI to the playback warden's
+`play_now` verb on the `audio.playback` shelf. The
+warden owns transport custody; DLNA is a source of URIs,
+not of playback state.
+"""
+
+# ----- Request types -----
+
+[[requests]]
+request_type = "source.dlna.refresh"
+description = """
+Trigger an SSDP discovery sweep + fetch every newly-seen
+MediaServer's device description. Payload is `{ v: 1 }`.
+
+Returns `{ v: 1, count: u32, servers: [DiscoveredServer...] }`
+where each DiscoveredServer is `{ service_id: string,
+friendly_name: string, control_url: string, base_url: string,
+location: string, last_seen_ms: u64 }`. The list is sorted
+by `friendly_name` ascending; the persisted
+`discovered.json` state file is rewritten atomically before
+the verb returns.
+
+The refresh sweep is bounded (3 s M-SEARCH timeout);
+long-running fetches for individual device descriptions run
+concurrently. A device that responded to SSDP but whose
+description fetch failed is not added to the discovered set
+but is logged at DEBUG so an operator inspecting the journal
+sees the cause.
+"""
+
+[[requests]]
+request_type = "source.dlna.list"
+description = """
+Return the persisted discovered-server set without
+triggering a fresh SSDP sweep. Payload is `{ v: 1 }`.
+
+Returns `{ v: 1, count: u32, servers: [DiscoveredServer...] }`
+— same shape as `source.dlna.refresh` returns but never
+touches the LAN. Consumers use this on connect to seed the
+Sources panel from the persisted state, then subscribe to
+the library subject for reactive updates and only fire
+`refresh` on an explicit operator gesture.
+"""
+
+[[requests]]
+request_type = "source.dlna.browse"
+description = """
+Browse one server's ContentDirectory tree, one page at a
+time. Payload is `{ v: 1, service_id: string, object_id:
+string?, page: u32?, page_size: u32? }`.
+
+`service_id` names the target server (must appear in the
+discovered set — the plugin refuses with Permanent otherwise).
+`object_id` names the container to browse; defaults to `"0"`
+(the ContentDirectory root). `page` defaults to 0.
+`page_size` defaults to the plugin's page-size default and
+is clamped into `[1, DLNA_PAGE_HARD_CAP]`.
+
+Returns `{ v: 1, entries: [BrowseEntry...], next_page: u32 | null,
+total_matches: u32 | null }` where each BrowseEntry is
+`{ kind: "directory" | "file", name: string, path: string,
+child_count: u32 | null (directories), duration_ms: u64 | null
+(files), size_bytes: u64 | null (files), mime: string | null
+(files) }`. `path` is the object_id of the entry — the
+value the caller passes back as `object_id` on a subsequent
+`source.dlna.browse` to descend into a directory or on
+`source.dlna.resolve` to fetch a file's stream URI.
+
+`total_matches` is the server-reported TotalMatches from the
+underlying ContentDirectory Browse response when the server
+provides it; `null` when the server omitted it (some
+implementations do not populate the field on paged results).
+`next_page` is `null` on the last page; otherwise the value
+the caller passes as `page` to fetch the next.
+"""
+
+[[requests]]
+request_type = "source.dlna.resolve"
+description = """
+Resolve one DIDL object to its playable streaming URI +
+metadata. Payload is `{ v: 1, service_id: string, object_id:
+string }`.
+
+Returns `{ v: 1, uri: string, mime: string | null,
+duration_ms: u64 | null, bitrate: u32 | null,
+sample_rate_hz: u32 | null, channels: u32 | null,
+title: string | null, artist: string | null,
+album: string | null }`. The `uri` field is the streaming
+URL selected from the DIDL object's `res` elements by the
+plugin's format-preference ranker. DIDL metadata fields
+(title, artist, album) are populated when the object's DIDL
+carries the corresponding upnp/dc tags; `null` otherwise
+per the truth-or-null wire discipline.
+
+Consumers pass the resolved `uri` to the playback warden's
+`play_now` verb (or into the queue via `queue.enqueue`) —
+this verb is the DLNA identity-to-stream-URI bridge.
+"""
+
+[[requests]]
+request_type = "play_now"
+description = """
+Convenience bridge: resolve the DIDL object named by a
+`dlna:<service_id>/<object_id>` URI and hand the resulting
+streaming URI to the playback warden's `play_now` verb on
+the `audio.playback` shelf. Payload is `{ v: 1, uri: string }`
+where `uri` MUST bear the `dlna:` scheme this plugin owns.
+
+Returns `{ v: 1, resolved_uri: string, transport_state:
+string }` — `resolved_uri` is the streaming URL the plugin
+handed to the warden; `transport_state` is the warden's
+post-dispatch state ("playing" on success).
+
+Refuses with structured Permanent errors on: (a) URI does
+not bear the `dlna:` scheme; (b) URI is not the
+`dlna:<service>/<object>` form; (c) `service_id` is not in
+the discovered set; (d) `object_id` is not resolvable via
+ContentDirectory Browse. Transient errors surface for
+transport failures against the MediaServer or the playback
+warden.
+"""
+
+# ----- Acceptance rows -----
+
+[[acceptance]]
+name = "dlna-respondent-cardinality"
+detail = "Only one plugin may claim the `audio.dlna` shelf at a time. The reference implementation is `org.evoframework.source.dlna` in the audio distribution."
+
+[[acceptance]]
+name = "dlna-uri-scheme-ownership"
+detail = "The `dlna` URI scheme is owned by the `audio.dlna` shelf's occupant. Other plugins MUST NOT resolve, play, or persist references to `dlna:...` URIs outside this shelf. Cross-shelf `play_now` bridges (audio.dlna → audio.playback) are the sanctioned mechanism; direct enqueue of a `dlna:` URI on the queue shelf without the resolve bridge is forbidden — the queue would carry an identity URI it cannot play."
+
+[[acceptance]]
+name = "dlna-discovered-state-persisted"
+detail = "The plugin MUST persist the discovered-server set at `/var/lib/evo/state/org.evoframework.source.dlna/discovered.json` atomically (tmp + rename) on every merge. On plugin load the persisted state seeds `source.dlna.list` responses so a consumer connecting during boot sees the pre-restart LAN inventory rather than an empty list. The 10-minute grace window (retain servers whose `last_seen_ms` is within the window) prevents a briefly-absent MediaServer from vanishing from the operator UI."
+
+[[acceptance]]
+name = "dlna-browse-page-size-clamped"
+detail = "Operator-supplied `page_size` on `source.dlna.browse` MUST be clamped into `[1, DLNA_PAGE_HARD_CAP]` silently. A caller requesting page_size=0 or page_size=100000 receives the clamped value; the clamp is not surfaced as an error. This preserves operator gesture safety without burning a request on a validation refusal for a value the plugin can safely clamp."
+
+[[acceptance]]
+name = "dlna-play-now-transient-vs-permanent-classification"
+detail = "The `play_now` bridge MUST classify refusals distinctly: URI-shape defects (missing scheme, wrong form, missing components) are Permanent (the operator's gesture is malformed and retrying will not help); MediaServer unreachable / ContentDirectory Browse failure / DIDL-parse failure / warden-side transport failure are Transient (a network or upstream issue that may resolve on retry). Consumers surface Permanent as a terminal error, Transient as a retry-with-backoff opportunity."
