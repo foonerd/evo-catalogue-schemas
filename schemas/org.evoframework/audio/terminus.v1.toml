@@ -19,11 +19,22 @@
 # compute, and the transport / multi-room gating that decides
 # when to emit frames.
 #
-# Cadence is ALSA-paced (~47 Hz at the canonical 48 kHz /
-# 1024-point FFT chain); the wire `rate_hz` field on every
-# emitted frame carries the value subscribers actually
-# receive at so they can drive their render loop off the
-# subject rather than an assumed cadence.
+# Cadence: the ALSA capture loop is paced by the sample
+# rate / FFT hop (~47 Hz at 48 kHz / 1024-point). Emission
+# to the subject is governed by a wall-clock throttle
+# targeting `demand.rate_hz_target` (default 30 Hz); the
+# wire `rate_hz` field on every emitted frame carries the
+# governed emit rate subscribers actually receive at so
+# they can drive their render loop off the subject rather
+# than an assumed cadence.
+#
+# Shape: every emitted frame carries `bins` and `channels`
+# fields that are the payload-truth authority. The producer
+# reshapes to match the current
+# `audio_playback_spectrum_demand` within one to two frames
+# of a demand change; the demand subject is the control
+# surface, the frame's `bins`/`channels` fields are the
+# per-frame shape authority.
 
 schema_version = 1
 rack = "audio"
@@ -32,13 +43,18 @@ shape = 1
 
 description = """
 Post-mixer audio-derived signal surface. The reference plugin
-taps the `pcm.evo` ALSA loopback and computes a 256-bin
-mel-scale stereo Float32 FFT with peak-hold per bin,
-per-band onset event detection, and L/R correlation for
-stereo-imaging visualisations. The compute cadence is ALSA-
+taps the `pcm.evo` ALSA loopback and computes a mel-scale
+Float32 FFT sized to the current demand (`bins ∈
+{32, 64, 128, 256}`, `channels ∈ {1, 2}`) with peak-hold per
+bin, per-band onset event detection, and — on stereo demand
+— L/R correlation for stereo-imaging visualisations. On mono
+demand the analyser averages L+R at the mel stage and the
+correlation array is zero-length. Compute cadence is ALSA-
 paced (one FFT per `FFT_SIZE` samples drawn at the
 configured sample rate — ~47 Hz on the canonical
-48 kHz / 1024-point chain).
+48 kHz / 1024-point chain); emission cadence is throttled
+by a wall-clock governor to the demand's `rate_hz_target`
+(default 30 Hz), decoupling wire cadence from ALSA hop.
 
 Emission is gated on the `audio_playback_now_playing`
 subject's `transport_state == "playing"` and on the local
@@ -66,28 +82,33 @@ surface. Payload is the empty object `{}`.
 
 Returns the same envelope shape as the
 `audio_playback_spectrum_frame` subject: `{ v: 1, rate_hz:
-u32, ts_ms: u64, bins: u32, left: [f32...], right: [f32...],
-peak_hold_left: [f32...], peak_hold_right: [f32...],
-onsets: OnsetFlags, correlation: [f32...] }`. `bins` is the
-constant number of FFT bins (256 in the reference chain);
-each of the six per-bin arrays has exactly `bins` entries.
+u32, at_ms: u64, bins: u32, channels: u32, magnitudes:
+[[f32...], ...], peak_hold: [[f32...], ...], onsets:
+OnsetFlags, correlation: [f32...] }`. `bins` and `channels`
+are the payload-truth shape authority — the values a
+consumer MUST use to interpret this envelope, matching the
+producer's current demand. `magnitudes` and `peak_hold` are
+arrays-of-arrays with `channels` outer entries (1 on mono,
+2 on stereo) and `bins` inner entries each. On stereo,
+`correlation` carries `bins` per-bin L/R correlation
+values; on mono, `correlation` is zero-length.
 
 Frame values are in `[0.0, 1.0]` after the perceptual
-scaling pass. `peak_hold_left` / `peak_hold_right` carry the
+scaling pass. `peak_hold` per-channel arrays carry the
 decayed per-bin peaks so UI consumers can render a peak-hold
 overlay without maintaining their own decay state.
 `onsets` is a per-band flag set (`sub_bass`, `bass`, `mid`,
 `high`) — each `bool` fires true on the frame where the band
-crossed its detection threshold. `correlation` carries the
-per-bin L/R correlation coefficient for stereo-imaging
-visualisations.
+crossed its detection threshold.
 
 Consumers subscribing to the subject typically call this
 verb once on connect to seed their render loop, then let
 subject updates drive the frame stream. Callers connecting
-during a stopped / paused transport receive the empty-frame
-envelope (all arrays present with zeroes) rather than an
-error, mirroring the truth-or-null wire discipline.
+during a stopped / paused transport (or with the demand
+disabled) receive the empty-frame envelope shaped by the
+current demand (all arrays present with zeroes at the
+current `bins` / `channels`) rather than an error,
+mirroring the truth-or-null wire discipline.
 """
 
 [[requests]]
@@ -217,4 +238,12 @@ detail = "Terminus plugin health MUST NOT affect the primary playback path. ALSA
 
 [[acceptance]]
 name = "terminus-get-spectrum-frame-first-render-parity"
-detail = "The `get_spectrum_frame` read verb MUST return the same envelope shape the subject publishes, including on quiet transports (stopped / paused). The empty-frame shape (all six per-bin arrays populated with zeroes; `onsets` all-false; `ts_ms` = 0) is a valid return, not an error. This preserves first-render parity: a UI panel subscribing to the subject and calling this verb once on connect renders the same shape whether audio is playing or not."
+detail = "The `get_spectrum_frame` read verb MUST return the same envelope shape the subject publishes, including on quiet transports (stopped / paused) and on demand.enabled=false. The empty-frame shape (per-channel arrays populated with zeroes at the current demand's `bins` / `channels`; `onsets` all-false; `at_ms` = 0; `correlation` zero-length on mono) is a valid return, not an error. This preserves first-render parity: a UI panel subscribing to the subject and calling this verb once on connect renders the same shape whether audio is playing or not."
+
+[[acceptance]]
+name = "terminus-frame-shape-mirrors-demand"
+detail = "Every emitted `audio_playback_spectrum_frame` MUST carry `bins` and `channels` fields that match the value at emission time; consumers MUST use those fields as the payload-truth shape authority (not any cached demand value). A demand change (via `audio.spectrum.set_demand`) MUST be reflected in the emitted frames within one to two frames — the producer rebuilds the analyser at the new shape and resumes emission. Between the demand-change tick and the analyser rebuild, the producer publishes an empty envelope at the NEW shape via the subject so subscribers never see a stale shape. `magnitudes` and `peak_hold` are shaped `[channels][bins]`. On `channels == 1` (mono demand), the analyser averages L+R at the mel stage and the `correlation` array is zero-length. On `channels == 2` (stereo demand), `correlation` carries `bins` per-bin L/R correlation values."
+
+[[acceptance]]
+name = "terminus-emit-rate-follows-demand-target"
+detail = "Emission cadence to the `audio_playback_spectrum_frame` subject MUST be governed by a wall-clock throttle targeting the demand's `rate_hz_target` (default 30 Hz), not the ALSA hop rate. The emitted frame's `rate_hz` field MUST carry the target value. On the canonical 48 kHz / 1024-point chain (ALSA hop ~47 Hz), the measured emit rate MUST be within ±10% of the target — the producer drops (does not queue) analyser frames between emit ticks. `rate_hz_target` is clamped to `[1, 60]` at the plugin."
