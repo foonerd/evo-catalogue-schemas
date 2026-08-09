@@ -90,6 +90,50 @@ envelope (all arrays present with zeroes) rather than an
 error, mirroring the truth-or-null wire discipline.
 """
 
+[[requests]]
+request_type = "audio.spectrum.set_demand"
+description = """
+Write the spectrum-demand control plane. Payload is
+`{ v: 1, enabled: bool, bins: u32, channels: u32,
+   rate_hz_target: u32 }` where `bins ∈ {32, 64, 128, 256}`
+and `channels ∈ {1, 2}`. `rate_hz_target` is clamped to
+`[1, 60]` at the plugin.
+
+Returns `{ v: 1, applied: <full demand envelope> }` with the
+demand values the plugin persisted (`applied.updated_at_ms`
+carries the wall-clock stamp).
+
+Semantics:
+
+- `enabled = false` parks the producer identically to
+  `TransportGate::NotPlaying` — the plugin closes its ALSA
+  capture PCM (rig-verifiable via `lsof -p <pid>`), the
+  outer capture loop idles, no FFT compute, no emit_frame.
+  This is the operator-visible toggle's actual effect on
+  device footprint; the pre-supersession implementation
+  saved browser render CPU only.
+- `enabled = true` with `bins` / `channels` at the operator's
+  chosen values opens the capture path.
+- `preset` / `palette` / `color_mode` / `sensitivity_db`
+  are renderer-only and MUST NOT appear on the payload
+  (rejected with Permanent via `deny_unknown_fields`). The
+  UI folds `preset=off` into `enabled=false` at the settings
+  layer so `enabled` is the single production-truth field.
+
+Apply path: evo-ui-runtime's settings-patch bridge derives
+the demand-write from any patch to `ui.visualizer.
+{enabled, bin_count, channel_mode}` in the runtime's
+settings store and calls this verb. Every settings origin
+(settings surface, designer, any future client) inherits the
+demand-write automatically — single write path prevents the
+divergence class where a client patches the settings but
+forgets to call the demand verb.
+
+Refuses with structured Permanent on: unsupported payload
+version; bins outside the enum; channels outside the enum;
+unknown field in the payload.
+"""
+
 # ----- Subjects -----
 
 [[subjects]]
@@ -111,11 +155,57 @@ carries the burden of the cross-shelf composition so
 consumers do not have to know the terminus shelf exists.
 """
 
+[[subjects]]
+addressing = { scheme = "evo.audio.playback", value = "spectrum_demand" }
+subject_type = "audio_playback_spectrum_demand"
+description = """
+Spectrum-demand control plane. Announced at plugin load with
+the disabled-default envelope; republished on every
+`audio.spectrum.set_demand` verb dispatch.
+
+Envelope shape (v1):
+
+```
+{
+  "v":              1,
+  "enabled":        bool,
+  "bins":           u32,   // one of 32, 64, 128, 256
+  "channels":       u32,   // one of 1, 2
+  "rate_hz_target": u32,   // producer emit throttle; typical 30
+  "updated_at_ms":  u64
+}
+```
+
+`enabled` is the single production-truth field. When `false`,
+the terminus producer parks (releases ALSA PCM, no FFT, no
+emit) identically to `TransportGate::NotPlaying`. When
+`true`, the producer opens the capture path and emits at the
+demand's `bins` / `channels` shape.
+
+Renderer-only choices (`preset`, `palette`, `color_mode`,
+`sensitivity_db`) MUST NOT appear on this subject — those are
+UI concerns with no production-plane meaning. `preset=off`
+folds to `enabled=false` at the settings layer.
+
+Apply path is the framework-side wire op
+`audio.spectrum.set_demand` (see the request section above).
+Consumers observing this subject typically read it once on
+connect for the current shape; the frame-authoritative shape
+lives on `audio_playback_spectrum_frame` per-frame (a
+demand change may lead the analyser rebuild by one or two
+frames — the frame's `bins`/`channels` fields are the shape
+authority, the demand subject is the control surface).
+"""
+
 # ----- Acceptance rows -----
 
 [[acceptance]]
 name = "terminus-respondent-cardinality"
 detail = "Only one plugin may claim the `audio.terminus` shelf at a time. The reference implementation is `org.evoframework.audio.terminus` in the audio distribution."
+
+[[acceptance]]
+name = "spectrum-demand-drives-producer-park-and-shape"
+detail = "The `audio_playback_spectrum_demand` subject is the sole production-truth surface for the terminus producer. `enabled = false` MUST close the plugin's ALSA capture PCM (rig-verifiable via `lsof -p <pid>` — the loopback capture device MUST NOT appear in the FD list), idle the outer capture loop, and stop `emit_frame`. Silent-subject-with-FFT-still-spinning is a substrate defect; the operator toggle exists to reduce device footprint, not just browser render CPU. `enabled = true` opens the capture path. `preset`, `palette`, `color_mode`, `sensitivity_db` are renderer-only and MUST NOT reach the demand subject; the UI folds `preset=off` into `enabled=false` at the settings layer so `enabled` is the single production-truth field. `bins ∈ {32, 64, 128, 256}` and `channels ∈ {1, 2}` enums are refused with structured Permanent outside the enum. `rate_hz_target` is clamped to `[1, 60]` at the plugin. Apply path is the F1-A runtime bridge: evo-ui-runtime derives the demand-write from any `ui.visualizer.{enabled, bin_count, channel_mode}` settings patch and calls the `audio.spectrum.set_demand` verb; every settings origin inherits the demand-write by construction."
 
 [[acceptance]]
 name = "terminus-emission-gated-on-transport-and-leader"
