@@ -21,8 +21,8 @@
 #
 # Cadence: the ALSA capture loop is paced by the sample
 # rate / hop (~47 Hz at 48 kHz / hop 1024) while each FFT
-# analyses an overlapped window of 16384 samples
-# (ADR-0170). Emission to the subject is governed by a
+# analyses an overlapped window of 16384 samples via an
+# overlap ring. Emission to the subject is governed by a
 # wall-clock throttle targeting `demand.rate_hz_target`
 # (default 30 Hz); the wire `rate_hz` field on every
 # emitted frame carries the governed emit rate subscribers
@@ -47,9 +47,9 @@ Post-mixer audio-derived signal surface. The reference plugin
 taps the `pcm.evo` ALSA loopback and computes a demand-
 driven Float32 FFT sized to the current demand (`bins ∈
 {32, 64, 128, 256}`, `channels ∈ {1, 2}`, `frequency_scale ∈
-{log, mel, linear}` — default log per the 2026-08-11
-spectrum-frequency-scale ownership audit) with peak-hold per
-bin, per-band onset event detection, and — on stereo demand
+{log, mel, linear}` — default log, the music-analyser
+convention) with peak-hold per bin, per-band onset event
+detection, and — on stereo demand
 — L/R correlation for stereo-imaging visualisations. On mono
 demand the analyser averages L+R at the filterbank stage and
 the correlation array is zero-length. Compute cadence is
@@ -123,11 +123,11 @@ Write the spectrum-demand control plane. Payload is
 `bins ∈ {32, 64, 128, 256}`, `channels ∈ {1, 2}`, and
 `frequency_scale ∈ {"log", "mel", "linear"}`. `rate_hz_target`
 is clamped to `[1, 60]` at the plugin. `frequency_scale`
-absent (older UI runtime bridge) parses to `"log"` per the
-2026-08-11 spectrum-frequency-scale ownership audit.
+absent (older UI runtime bridge) parses to `"log"` — the
+default at every parse boundary.
 
 Scale × bins: every documented `bins` value is accepted under
-every `frequency_scale` (ADR-0170). Honesty at dense log
+every `frequency_scale`. Honesty at dense log
 counts is the analyser's job (`FFT_WINDOW=16384`,
 `HOP_SIZE=1024` overlap ring, anti-clone banking) — not a
 product refuse on this verb.
