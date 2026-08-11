@@ -20,13 +20,14 @@
 # when to emit frames.
 #
 # Cadence: the ALSA capture loop is paced by the sample
-# rate / FFT hop (~47 Hz at 48 kHz / 1024-point). Emission
-# to the subject is governed by a wall-clock throttle
-# targeting `demand.rate_hz_target` (default 30 Hz); the
-# wire `rate_hz` field on every emitted frame carries the
-# governed emit rate subscribers actually receive at so
-# they can drive their render loop off the subject rather
-# than an assumed cadence.
+# rate / hop (~47 Hz at 48 kHz / hop 1024) while each FFT
+# analyses an overlapped window of 16384 samples
+# (ADR-0170). Emission to the subject is governed by a
+# wall-clock throttle targeting `demand.rate_hz_target`
+# (default 30 Hz); the wire `rate_hz` field on every
+# emitted frame carries the governed emit rate subscribers
+# actually receive at so they can drive their render loop
+# off the subject rather than an assumed cadence.
 #
 # Shape: every emitted frame carries `bins` and `channels`
 # fields that are the payload-truth authority. The producer
@@ -52,10 +53,10 @@ bin, per-band onset event detection, and — on stereo demand
 — L/R correlation for stereo-imaging visualisations. On mono
 demand the analyser averages L+R at the filterbank stage and
 the correlation array is zero-length. Compute cadence is
-ALSA-paced (one FFT per `FFT_SIZE` samples drawn at the
-configured sample rate — ~47 Hz on the canonical
-48 kHz / 1024-point chain); emission cadence is throttled
-by a wall-clock governor to the demand's `rate_hz_target`
+ALSA-paced (one FFT per hop of 1024 samples, analysing the
+most recent 16384-sample window — ~47 Hz on the canonical
+48 kHz chain); emission cadence is throttled by a
+wall-clock governor to the demand's `rate_hz_target`
 (default 30 Hz), decoupling wire cadence from ALSA hop.
 
 Emission is gated on the `audio_playback_now_playing`
@@ -125,12 +126,11 @@ is clamped to `[1, 60]` at the plugin. `frequency_scale`
 absent (older UI runtime bridge) parses to `"log"` per the
 2026-08-11 spectrum-frequency-scale ownership audit.
 
-Scale × bins pairing: `frequency_scale = "log"` refuses
-`bins > 64` with Permanent — the honest-resolution ceiling
-at the canonical 48 kHz / FFT 1024 chain. Above 64 log
-output bins the low-end bands collapse onto identical
-integer FFT ranges and paint duplicate columns. `"mel"` and
-`"linear"` accept every documented `bins` value.
+Scale × bins: every documented `bins` value is accepted under
+every `frequency_scale` (ADR-0170). Honesty at dense log
+counts is the analyser's job (`FFT_WINDOW=16384`,
+`HOP_SIZE=1024` overlap ring, anti-clone banking) — not a
+product refuse on this verb.
 
 Returns `{ v: 1, applied: <full demand envelope> }` with the
 demand values the plugin persisted (`applied.updated_at_ms`
@@ -150,14 +150,16 @@ Semantics:
   saved browser render CPU only.
 - `enabled = true` with `bins` / `channels` /
   `frequency_scale` at the operator's chosen values opens
-  the capture path.
+  the capture path. Product default shape when no prior
+  demand exists: disabled, bins=256, channels=1,
+  frequency_scale=log.
 - `frequency_scale` determines how the operator's `bins`
   output slots are distributed across `[20, 20000]` Hz:
-  `"log"` (default, music-analyser convention), `"mel"`
-  (perceptual bank, prior default), `"linear"` (raw-Hz
-  diagnostics). A mid-play scale change rebuilds the
-  analyser within one to two frames alongside `bins` and
-  `channels` changes.
+  `"log"` (default, ANSI/IEC S1.11 base-10 equal-ratio /
+  music-analyser convention), `"mel"` (perceptual bank,
+  prior default), `"linear"` (raw-Hz diagnostics). A
+  mid-play scale change rebuilds the analyser within one
+  to two frames alongside `bins` and `channels` changes.
 - Column pitch on glass is `width / bins` under every
   scale — no scale ever changes bar width. What each scale
   changes is the Hz range feeding each column: `"log"`
@@ -182,17 +184,12 @@ runtime's settings store and calls this verb. Every settings
 origin (settings surface, designer, any future client)
 inherits the demand-write automatically — single write path
 prevents the divergence class where a client patches the
-settings but forgets to call the demand verb. The bridge
-SHOULD gate its bins option per scale so the operator never
-picks a combination the wire refuses; the Permanent below
-is the last-defence contract, not the primary UX.
+settings but forgets to call the demand verb.
 
 Refuses with structured Permanent on: unsupported payload
 version; bins outside the enum; channels outside the enum;
 unknown frequency_scale value (e.g. `"octave"`,
-`"logarithmic"`); `frequency_scale = "log"` paired with
-`bins > 64` (honest-resolution ceiling); unknown field in
-the payload.
+`"logarithmic"`); unknown field in the payload.
 """
 
 # ----- Subjects -----
@@ -290,4 +287,4 @@ detail = "The producer MUST NOT run the ALSA capture path unless at least one WS
 
 [[acceptance]]
 name = "terminus-emit-rate-follows-demand-target"
-detail = "Emission cadence to the `audio_playback_spectrum_frame` subject MUST be governed by a wall-clock throttle targeting the demand's `rate_hz_target` (default 30 Hz), not the ALSA hop rate. The emitted frame's `rate_hz` field MUST carry the target value. On the canonical 48 kHz / 1024-point chain (ALSA hop ~47 Hz), the measured emit rate MUST be within ±10% of the target — the producer drops (does not queue) analyser frames between emit ticks. `rate_hz_target` is clamped to `[1, 60]` at the plugin."
+detail = "Emission cadence to the `audio_playback_spectrum_frame` subject MUST be governed by a wall-clock throttle targeting the demand's `rate_hz_target` (default 30 Hz), not the ALSA hop rate. The emitted frame's `rate_hz` field MUST carry the target value. On the canonical 48 kHz / hop-1024 chain (ALSA hop ~47 Hz; analysis window 16384 with overlap), the measured emit rate MUST be within ±10% of the target — the producer drops (does not queue) analyser frames between emit ticks. `rate_hz_target` is clamped to `[1, 60]` at the plugin."
