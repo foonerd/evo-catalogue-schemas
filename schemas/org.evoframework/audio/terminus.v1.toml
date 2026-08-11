@@ -43,14 +43,16 @@ shape = 1
 
 description = """
 Post-mixer audio-derived signal surface. The reference plugin
-taps the `pcm.evo` ALSA loopback and computes a mel-scale
-Float32 FFT sized to the current demand (`bins ∈
-{32, 64, 128, 256}`, `channels ∈ {1, 2}`) with peak-hold per
+taps the `pcm.evo` ALSA loopback and computes a demand-
+driven Float32 FFT sized to the current demand (`bins ∈
+{32, 64, 128, 256}`, `channels ∈ {1, 2}`, `frequency_scale ∈
+{log, mel, linear}` — default log per the 2026-08-11
+spectrum-frequency-scale ownership audit) with peak-hold per
 bin, per-band onset event detection, and — on stereo demand
 — L/R correlation for stereo-imaging visualisations. On mono
-demand the analyser averages L+R at the mel stage and the
-correlation array is zero-length. Compute cadence is ALSA-
-paced (one FFT per `FFT_SIZE` samples drawn at the
+demand the analyser averages L+R at the filterbank stage and
+the correlation array is zero-length. Compute cadence is
+ALSA-paced (one FFT per `FFT_SIZE` samples drawn at the
 configured sample rate — ~47 Hz on the canonical
 48 kHz / 1024-point chain); emission cadence is throttled
 by a wall-clock governor to the demand's `rate_hz_target`
@@ -116,13 +118,19 @@ request_type = "audio.spectrum.set_demand"
 description = """
 Write the spectrum-demand control plane. Payload is
 `{ v: 1, enabled: bool, bins: u32, channels: u32,
-   rate_hz_target: u32 }` where `bins ∈ {32, 64, 128, 256}`
-and `channels ∈ {1, 2}`. `rate_hz_target` is clamped to
-`[1, 60]` at the plugin.
+   rate_hz_target: u32, frequency_scale: string }` where
+`bins ∈ {32, 64, 128, 256}`, `channels ∈ {1, 2}`, and
+`frequency_scale ∈ {"log", "mel", "linear"}`. `rate_hz_target`
+is clamped to `[1, 60]` at the plugin. `frequency_scale`
+absent (older UI runtime bridge) parses to `"log"` per the
+2026-08-11 spectrum-frequency-scale ownership audit.
 
 Returns `{ v: 1, applied: <full demand envelope> }` with the
 demand values the plugin persisted (`applied.updated_at_ms`
-carries the wall-clock stamp).
+carries the wall-clock stamp; `applied.frequency_scale`
+carries the scale terminus is actively running so a
+validated-apply helper can compare against the requested
+value).
 
 Semantics:
 
@@ -133,8 +141,16 @@ Semantics:
   This is the operator-visible toggle's actual effect on
   device footprint; the pre-supersession implementation
   saved browser render CPU only.
-- `enabled = true` with `bins` / `channels` at the operator's
-  chosen values opens the capture path.
+- `enabled = true` with `bins` / `channels` /
+  `frequency_scale` at the operator's chosen values opens
+  the capture path.
+- `frequency_scale` determines how the operator's `bins`
+  output slots are distributed across `[20, 20000]` Hz:
+  `"log"` (default, music-analyser convention), `"mel"`
+  (perceptual bank, prior default), `"linear"` (raw-Hz
+  diagnostics). A mid-play scale change rebuilds the
+  analyser within one to two frames alongside `bins` and
+  `channels` changes.
 - `preset` / `palette` / `color_mode` / `sensitivity_db`
   are renderer-only and MUST NOT appear on the payload
   (rejected with Permanent via `deny_unknown_fields`). The
@@ -143,16 +159,17 @@ Semantics:
 
 Apply path: evo-ui-runtime's settings-patch bridge derives
 the demand-write from any patch to `ui.visualizer.
-{enabled, bin_count, channel_mode}` in the runtime's
-settings store and calls this verb. Every settings origin
-(settings surface, designer, any future client) inherits the
-demand-write automatically — single write path prevents the
-divergence class where a client patches the settings but
-forgets to call the demand verb.
+{enabled, bin_count, channel_mode, frequency_scale}` in the
+runtime's settings store and calls this verb. Every settings
+origin (settings surface, designer, any future client)
+inherits the demand-write automatically — single write path
+prevents the divergence class where a client patches the
+settings but forgets to call the demand verb.
 
 Refuses with structured Permanent on: unsupported payload
 version; bins outside the enum; channels outside the enum;
-unknown field in the payload.
+unknown frequency_scale value (e.g. `"octave"`,
+`"logarithmic"`); unknown field in the payload.
 """
 
 # ----- Subjects -----
