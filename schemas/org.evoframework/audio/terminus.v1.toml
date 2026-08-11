@@ -125,6 +125,13 @@ is clamped to `[1, 60]` at the plugin. `frequency_scale`
 absent (older UI runtime bridge) parses to `"log"` per the
 2026-08-11 spectrum-frequency-scale ownership audit.
 
+Scale × bins pairing: `frequency_scale = "log"` refuses
+`bins > 64` with Permanent — the honest-resolution ceiling
+at the canonical 48 kHz / FFT 1024 chain. Above 64 log
+output bins the low-end bands collapse onto identical
+integer FFT ranges and paint duplicate columns. `"mel"` and
+`"linear"` accept every documented `bins` value.
+
 Returns `{ v: 1, applied: <full demand envelope> }` with the
 demand values the plugin persisted (`applied.updated_at_ms`
 carries the wall-clock stamp; `applied.frequency_scale`
@@ -151,6 +158,17 @@ Semantics:
   diagnostics). A mid-play scale change rebuilds the
   analyser within one to two frames alongside `bins` and
   `channels` changes.
+- Column pitch on glass is `width / bins` under every
+  scale — no scale ever changes bar width. What each scale
+  changes is the Hz range feeding each column: `"log"`
+  gives many equal-width columns to bass, `"mel"` fewer,
+  `"linear"` one or two. A renderer that widens or narrows
+  columns per scale is remapping the wire and violates the
+  contract.
+- The projection loop unconditionally skips FFT bin 0 (DC)
+  under every scale — DC carries no musical content and
+  would otherwise feed the lowest log-scale output bins as
+  sample-offset noise.
 - `preset` / `palette` / `color_mode` / `sensitivity_db`
   are renderer-only and MUST NOT appear on the payload
   (rejected with Permanent via `deny_unknown_fields`). The
@@ -164,12 +182,17 @@ runtime's settings store and calls this verb. Every settings
 origin (settings surface, designer, any future client)
 inherits the demand-write automatically — single write path
 prevents the divergence class where a client patches the
-settings but forgets to call the demand verb.
+settings but forgets to call the demand verb. The bridge
+SHOULD gate its bins option per scale so the operator never
+picks a combination the wire refuses; the Permanent below
+is the last-defence contract, not the primary UX.
 
 Refuses with structured Permanent on: unsupported payload
 version; bins outside the enum; channels outside the enum;
 unknown frequency_scale value (e.g. `"octave"`,
-`"logarithmic"`); unknown field in the payload.
+`"logarithmic"`); `frequency_scale = "log"` paired with
+`bins > 64` (honest-resolution ceiling); unknown field in
+the payload.
 """
 
 # ----- Subjects -----
