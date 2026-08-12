@@ -119,5 +119,4 @@ detail = "Plugins claiming the `eq_only` mode MUST cover the negotiated format's
 # reference `org.evoframework.composition.alsa`'s wire
 # contract. The schema's request_type list and acceptance
 # criteria are stable; the wire payload shape lands in a
-# follow-up authoring step. See evo-catalogue-schemas
-# CHANGELOG.
+# subsequent authoring step. See CHANGELOG.

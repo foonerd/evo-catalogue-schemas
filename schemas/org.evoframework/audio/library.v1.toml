@@ -405,7 +405,7 @@ reconciled_at_ms: u64 | null, evidence: object }`. The `class`
 is a stable snake-case key naming one drift class the plugin
 detects (`mpd_db_empty_but_music_present`,
 `registry_count_diverges`, `curation_carries_gone_uris` in the
-wave-1 set); UIs key on it for localised copy. `severity` is
+initial set); UIs key on it for localised copy. `severity` is
 one of `info | warn | critical`. `auto_reconciled` is `true`
 when the sweep fired the class's safe reconcile action
 successfully; `reconciled_at_ms` carries the wall-clock ms of
@@ -715,9 +715,9 @@ Wave-1 class keys (stable, snake-case):
   affected curation store and refresh the queue /
   favourites / playlist-index subjects.
 
-All wave-1 classes are safe-auto-reconcile. Future classes
-whose reconcile action requires an operator gesture publish
-with `auto_reconciled: false` and a non-empty
+All initial classes are safe-auto-reconcile. Additional
+classes whose reconcile action requires an operator gesture
+publish with `auto_reconciled: false` and a non-empty
 `prompt_required_count`; the `library.reconcile_triage`
 verb fires the safe classes and returns the envelope with
 the prompt-required set intact for operator confirmation.
