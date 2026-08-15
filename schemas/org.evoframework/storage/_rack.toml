@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Just a Nerd
+
+# Rack-level metadata for the `storage` rack.
+#
+# The storage rack hosts brand-neutral framework-tier shelves
+# governing block-storage inventory, mount lifecycle, filesystem
+# repair, and safe-remove for operator-facing removable media
+# (USB mass storage as a music source). Plugins implement the
+# contract against a specific block layer (udev / lsblk /
+# mountinfo on Linux distributions); the framework admits one
+# plugin per shelf.
+#
+# Boundary. This rack owns REMOVABLE block-storage
+# management as a music source — enumerate, classify (system
+# vs media), mount at a canonical root, filesystem repair,
+# safe-remove with consumer-stop-first discipline. It does NOT
+# own the OS boot substrate, disk partitioning, backup, or
+# non-removable internal storage. Sibling racks own their own
+# scopes (audio.library owns the library-source registry that
+# the storage plugin cross-plugin-dispatches into when a drive
+# becomes mounted).
+
+rack = "storage"
+namespace = "org.evoframework"
+
+description = """
+Brand-neutral storage rack hosting reference shelves for
+removable block-storage management as a music source. Plugins
+enumerate removable devices, classify system versus media,
+mount at a canonical root under the device's music plane,
+repair filesystems, and safe-remove with consumer-stop
+discipline. Vendor distributions adopt this rack's shape and
+either admit the reference plugin directly or supply an
+alternative on the same shape.
+"""
+
+# Shelves under this rack and their current shape version.
+# Each entry MUST have a corresponding `<shelf>.v<N>.toml`
+# file in this directory.
+[[shelves]]
+name = "usb"
+current_shape = 1

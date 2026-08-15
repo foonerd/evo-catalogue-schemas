@@ -1,0 +1,404 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Just a Nerd
+
+# Schema for the `storage.usb` shelf at shape version 1.
+#
+# Framework-tier substrate for operator-facing USB mass-storage
+# management as a music source. The invariant: an operator
+# plugs in a USB drive and it appears as a browseable music
+# source with a stable, user-friendly name, mounted at a
+# canonical path under the device's music plane, ready to be
+# safely removed and repaired without the operator ever running
+# `mount` / `umount` / `fsck` by hand.
+#
+# The shelf declares five surfaces:
+#
+# - Inventory: `list_drives` returns every USB block partition
+#   the runtime has classified (system + system-adjacent +
+#   removable), each with role + mount-policy so consumers can
+#   render policy honestly (boot drive visible with reduced
+#   affordances; sibling data partitions gated behind opt-in).
+# - Mount lifecycle: `mount` / `safe_remove` bind + unbind a
+#   removable drive under `/var/lib/evo/music/USB/<stable-id>/`,
+#   dispatching `library.add_source` on mount and
+#   `library.remove_source` on safe-remove.
+# - Filesystem repair: `repair_filesystem` handles the dirty
+#   detection + repair sequence per FS family
+#   (vfat / exfat / ntfs / ext) with consumer-stop-before-fsck
+#   discipline mirroring the shares shelf's
+#   MPD-stop-before-CIFS-mutation pattern.
+# - Operator alias: `rename` binds a friendly name to the
+#   drive's identity tuple (vendor, model, serial_short, partuuid)
+#   and the drive re-mounts under the new name across sessions.
+# - Reactive subject: `storage_usb_drives` singleton envelope
+#   carries the full `DriveRecord[]` snapshot; republished on
+#   every hotplug attach / detach / mount / umount / rename /
+#   repair transition. UI consumers subscribe on Sources page
+#   mount.
+#
+# Reference plugin: `org.evoframework.storage.usb`. Vendor
+# distributions may replace by shipping a same-shape plugin
+# under a vendor namespace; the shelf schema declares the wire
+# contract, not the implementation binding.
+
+schema_version = 1
+rack = "storage"
+shelf = "usb"
+shape = 1
+
+description = """
+Framework-tier USB mass-storage shelf. Operator plugs in a USB
+drive; the runtime enumerates + classifies + mounts + surfaces
+it under a stable user-friendly name at
+`/var/lib/evo/music/USB/<stable-id>/`. Classification is
+per-partition six-way (system-root / system-boot / system-efi
+/ system-swap / system-adjacent / removable) — the boot drive
+is inventoried and health-checked, not black-holed; its live
+system partitions refuse mount + live-fsck; its sibling data
+partitions are opt-in mountable and freely repairable when
+unmounted. Consumer-stop-before-mutation discipline pairs with
+the audio.library shelf via cross-plugin
+`library.add_source local_usb` / `library.remove_source`
+dispatch.
+"""
+
+# ---------------------------------------------------------------
+# Verbs — operator gestures
+# ---------------------------------------------------------------
+#
+# Every mutating verb capability-gated with step-up auth per
+# the framework's operator-gesture discipline. The plugin never
+# re-checks the principal — the framework dispatcher is the
+# authoritative gate.
+#
+# Read verbs are anonymous (widget seed reads for the Sources
+# page). The subject `storage_usb_drives` carries the same
+# `DriveRecord[]` shape as `list_drives`; consumers seed via
+# the read verb then subscribe for deltas.
+
+[[requests]]
+request_type = "storage.usb.list_drives"
+description = """
+Read the current USB-drive inventory. Returns the same
+`storage_usb_drives_envelope` shape the `storage_usb_drives`
+subject carries — full `{ v: 1, drives: [drive_record...],
+last_update_at }` snapshot.
+
+Each `drive_record` carries:
+  { stable_id, display_name, id_source, device_node,
+    parent_disk, partition_index, partition_count, label?,
+    uuid?, partuuid?, vendor?, model?, serial_short?, fs_type,
+    size_bytes, class, role, mount_policy, mount_root?,
+    library_source_id?, alias_set, last_transition_at_ms }
+
+Enums:
+  id_source =
+    | "operator_alias"
+    | "fs_label"
+    | "vendor_model"
+    | "model_only"
+    | "synthesized"
+
+  class =
+    | "system-disk"                  # legacy union — kept for
+    |                                # back-compat; consumers
+    |                                # should read `role` for
+    |                                # the six-way taxonomy.
+    | "unsupported"                  # fs_type not in support matrix
+    | "unmounted"                    # detected, not yet mounted
+    | "mounted-clean"
+    | "mounted-dirty"
+    | "mounted-dirty-hiberfile"      # NTFS hiberfile present
+    | "mount-failed-dirty"
+    | "mount-failed-oversized-vfat"  # >2 TiB FAT32 refuse
+    | "mount-failed-other"
+
+  role =
+    | "system-root"                  # backs /
+    | "system-boot"                  # backs /boot
+    | "system-efi"                   # backs /boot/efi (or ESP)
+    | "system-swap"                  # listed in /proc/swaps
+    | "system-adjacent"              # sibling on same parent disk
+    |                                # as any system-* partition;
+    |                                # not itself live-mounted
+    | "removable"                    # everything else
+
+  mount_policy =
+    | "auto"                         # default for removable
+    | "opt-in-required"              # default for system-adjacent;
+    |                                # operator sets alias with
+    |                                # explicit mount_policy = "opt-in"
+    |                                # before the runtime builds
+    |                                # mount argv
+    | "refused-system-live"          # fixed for the four live-system
+    |                                # roles — non-negotiable
+
+`role` and `mount_policy` are required non-nullable enum
+fields. Consumers rely on them to render policy honestly:
+the boot drive appears with its role + reduced affordances;
+sibling data partitions appear with an opt-in toggle; live
+system partitions appear informationally (SMART, size,
+model) with no actionable verbs.
+
+Idempotent; no state change; framework-runtime-owned (no
+plugin stocks this verb from the wire — the plugin itself
+serves it in-process against its runtime state).
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "storage.usb.mount"
+description = """
+Mount a detected USB drive under
+`/var/lib/evo/music/USB/<stable-id>/`. Refuses at the runtime
+layer (not just the wrapper) when:
+
+  - role ∈ { system-root, system-boot, system-efi, system-swap }
+    → error class `system_live_partition` (fixed refusal;
+    mount would corrupt the live OS or is meaningless for swap).
+  - role = system-adjacent AND the drive's alias entry does not
+    carry `mount_policy = "opt-in"` → error class
+    `system_adjacent_not_opted_in` (operator must name the
+    alias and confirm the policy first).
+  - fs_type not in the support matrix → `unsupported_fs`.
+  - fs_type = vfat AND size_bytes > 2 TiB → `mount_failed_oversized_vfat`.
+  - dirty-detection reports dirty AND repair not yet run →
+    `mount_failed_dirty` (operator uses `repair_filesystem` first).
+
+On success: dispatches `library.add_source local_usb` with the
+drive's `library_source_id`, republishes the subject with
+`class: mounted-clean` or `mounted-dirty`, returns
+`{ mounted_at, class, library_source_id }`.
+
+Payload: `{ v: 1, stable_id }`.
+Returns: `{ v: 1, mounted_at, class, library_source_id? }`.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "storage.usb.safe_remove"
+description = """
+Unmount a mounted drive with consumer-stop-first discipline:
+
+  1. Refuse if role ∈ system-live (would kill running OS or is
+     meaningless for swap).
+  2. Dispatch `library.remove_source` for the drive's
+     `library_source_id` so MPD stops holding files open.
+  3. `sync` on the parent disk.
+  4. Clean `umount`. On EBUSY:
+       - `force: false` (default) → return `Busy { holders }`
+         with the fuser-derived holder list. UI shows retry or
+         Force button.
+       - `force: true` → wrapper `umount-force` (lazy detach
+         `-l`). Warn logged, `removed: true` returned.
+  5. Best-effort SCSI `eject` on the parent disk. Failure
+     logged; not fatal (some drives ignore eject).
+  6. Retract from `storage_usb_drives` subject.
+
+Payload: `{ v: 1, stable_id, force?: bool }`.
+Returns: `{ v: 1, removed: true, forced?: bool, holders?: [...] }`.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "storage.usb.repair_filesystem"
+description = """
+Repair a dirty filesystem on a detected drive. Consumer-stop
+before fsck (mirrors the shares shelf MPD-stop-before-mutation
+pattern):
+
+  1. Refuse if role ∈ system-live (would corrupt live FS; the
+     runtime instead offers a `schedule_next_boot` path via a
+     future verb that writes `/forcefsck` sentinel).
+  2. Dispatch consumer-stop: `library.remove_source` for the
+     drive's `library_source_id` (MPD update).
+  3. `sync` on the parent disk.
+  4. Wrapper `umount <stable-id>`.
+  5. Wrapper `fsck <stable-id> <fs-type> <device-node>` per the
+     support matrix (fsck.vfat / fsck.exfat / ntfsfix / e2fsck).
+     `escalate: true` uses the tool's escalated mode (e.g.
+     `e2fsck -y` for ext families).
+  6. On repair success: re-mount via wrapper; re-dispatch
+     `library.add_source`; republish subject with `class: mounted-clean`.
+  7. On repair failure: republish with `class: mount-failed-dirty`
+     and the per-FS operator-visible copy string.
+
+NTFS-specific: `ntfsfix` accepts a dirty flag but refuses
+volumes with an active Windows hiberfile. The runtime detects
+that state and surfaces `class: mounted-dirty-hiberfile` with
+no repair verb offered (the operator resumes + shuts down
+cleanly from Windows first).
+
+Payload: `{ v: 1, stable_id, escalate?: bool }`.
+Returns: `{ v: 1, repaired: true, before_class, after_class }`.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "storage.usb.rename"
+description = """
+Bind a friendly operator alias to the drive's identity tuple
+`(vendor, model, serial_short, partuuid)`. Alias travels with
+the physical drive across replug and across boots; new mount
+target `/var/lib/evo/music/USB/<alias>/`. Alias sanitised per
+the stable-id token rule `^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$`;
+empty alias clears the alias and falls back to the next rule
+in the derivation ladder (fs_label → vendor+model → model →
+synthesized).
+
+Rename semantics — full remount cycle because the mount path
+IS the friendly id (operator `cd`s to it; Samba serves at it):
+
+  1. Alias sanitised + validated (empty → clear).
+  2. Persist `(vendor, model, serial_short, partuuid) → alias`
+     to plugin state (`aliases.toml`).
+  3. Recompute stable-id per the derivation ladder with the new
+     alias at rule 0.
+  4. Consumer-stop for the current `library_source_id`
+     (identical to safe-remove step 2).
+  5. `sync` + clean `umount` from the OLD mount path.
+  6. Empty-only `rmdir` on the OLD
+     `/var/lib/evo/music/USB/<old-id>`.
+  7. Mount at the NEW mount path.
+  8. `library.add_source local_usb` under the new id.
+  9. Republish subject with the new DriveRecord.
+
+The operator experiences: "Rename" → brief spinner while
+playback pauses if the drive is playing → new name on glass →
+Samba path reflects new name on next browse. Files never
+touched.
+
+For a `system-adjacent` drive: rename also carries an optional
+`mount_policy` field. Setting `mount_policy = "opt-in"` on
+rename opts the sibling partition in for auto-mount at the
+new alias name; omitting or setting `"opt-in-required"` keeps
+it gated (see `list_drives` for the enum semantics).
+
+Payload: `{ v: 1, stable_id, alias, mount_policy?: string }`.
+Returns: `{ v: 1, new_stable_id, class }`.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+# ---------------------------------------------------------------
+# Subjects — reactive state
+# ---------------------------------------------------------------
+#
+# Read-then-subscribe pattern: consumer reads via
+# `storage.usb.list_drives`, then subscribes to
+# `storage_usb_drives` for deltas. Every hotplug attach,
+# hotplug detach, mount, umount, rename, and repair-complete
+# republishes the full envelope.
+
+[[subjects]]
+subject = "storage_usb_drives"
+kind = "singleton"
+addressing = "evo.storage.usb.drives:local"
+description = """
+Full USB-drive inventory envelope. Republished on every
+hotplug attach / hotplug detach / mount / umount / rename /
+repair-complete. Payload matches the `list_drives` response
+shape byte-for-byte (single source of truth for consumer
+rendering).
+"""
+payload = "tbd-review"
+
+# ---------------------------------------------------------------
+# Acceptance
+# ---------------------------------------------------------------
+
+[[acceptance]]
+id = "list-drives-inventories-every-usb-partition"
+description = """
+`storage.usb.list_drives` returns EVERY USB-transport partition
+the runtime detected, including system-live partitions on a
+USB-booted device. Filtering happens at the consumer (UI) tier
+by role, not at the plugin's inventory tier. A boot drive is
+never black-holed.
+"""
+
+[[acceptance]]
+id = "role-classification-six-way"
+description = """
+Every `drive_record` carries a `role` from the six-way
+taxonomy (system-root / system-boot / system-efi / system-swap
+/ system-adjacent / removable). The mapping is deterministic
+from `/proc/self/mountinfo` + `/proc/swaps` + `lsblk PKNAME`
+correlation; the classifier has fixture tests covering every
+role transition (NVMe-boot + USB stick, USB-boot + USB stick,
+USB-boot with sibling data partition, VM virtio-boot + USB
+passthrough).
+"""
+
+[[acceptance]]
+id = "system-live-mount-refuse"
+description = """
+`storage.usb.mount` refuses `role ∈ {system-root, system-boot,
+system-efi, system-swap}` at the runtime layer with error
+class `system_live_partition`, regardless of operator
+confirmation or alias-file entry. Non-negotiable.
+"""
+
+[[acceptance]]
+id = "system-adjacent-opt-in-required"
+description = """
+`storage.usb.mount` refuses `role = system-adjacent` unless
+the drive's alias entry in `aliases.toml` carries
+`mount_policy = "opt-in"`. Error class
+`system_adjacent_not_opted_in` names the specific gate the
+operator must clear (name the alias + confirm the policy)
+before mount succeeds.
+"""
+
+[[acceptance]]
+id = "live-fsck-refuse-on-system-live"
+description = """
+`storage.usb.repair_filesystem` refuses `role ∈ system-live`
+with error class `system_live_partition`. Live fsck on a
+mounted-rw system partition would corrupt the filesystem;
+the runtime offers `schedule_next_boot` via a future verb
+that writes `/forcefsck` sentinel + optional reboot flag.
+"""
+
+[[acceptance]]
+id = "stable-id-derivation-ladder"
+description = """
+Stable-id derives via the ladder: operator_alias → fs_label →
+vendor+model → model → synthesized. Alias persistence keyed
+on `(vendor, model, serial_short, partuuid)` survives replug
+and reboot on the same rig with the same drives. Sanitisation
+matches `^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$`; case preserved.
+"""
+
+[[acceptance]]
+id = "vfat-oversize-refuse"
+description = """
+`storage.usb.mount` refuses vfat volumes where
+`size_bytes > 2 TiB` with error class
+`mount_failed_oversized_vfat` + operator-visible copy string
+recommending exFAT or ext4 reformat. Refuse is normative; no
+silent fs-driver switch, no silent truncation.
+"""
+
+[[acceptance]]
+id = "consumer-stop-before-mutation"
+description = """
+`storage.usb.safe_remove` and `storage.usb.repair_filesystem`
+dispatch `library.remove_source` for the drive's
+`library_source_id` BEFORE the mutation (sync / umount / fsck),
+mirroring the network.shares MPD-stop-before-CIFS-mutation
+pattern. No fsck runs while MPD holds files open.
+"""
+
+[[acceptance]]
+id = "rename-full-remount-cycle"
+description = """
+`storage.usb.rename` runs the full remount cycle (consumer-stop
+→ umount → rmdir old path → mount at new path → add_source
+under new id → republish). Files are never touched; the mount
+path IS the friendly id.
+"""
