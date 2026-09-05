@@ -394,7 +394,7 @@ detail = "`queue.play_from_position` MUST validate the requested position agains
 
 [[acceptance]]
 name = "queue-item-carries-artwork-url"
-detail = "Every QueueItem in the `audio_queue` envelope's `items` array MUST carry an `artwork_url` field of shape `/api/v1/audio/artwork?scheme=mpd-path&value=<url-encoded uri>`. The URL is target-addressed; UI consumers append `&size=...` per their render target. Percent-encoding follows RFC 3986 unreserved-set rules. See `audio.playback.v1` acceptance row `now-playing-track-carries-artwork-url` for the full cascade contract."
+detail = "Every QueueItem in the `audio_queue` envelope's `items` array MUST carry an `artwork_url` field of shape `/api/v1/audio/artwork?scheme=<scheme>&value=<url-encoded value>`. The scheme is envelope data chosen by the publisher, not a schema constant; `mpd-path` is the common case for a file URI, and consumers MUST read the scheme from the URL rather than assume it. The URL is target-addressed; UI consumers append `&size=...` per their render target. Percent-encoding follows RFC 3986 unreserved-set rules. See `audio.playback.v1` acceptance row `now-playing-track-carries-artwork-url` for the full cascade contract."
 
 # Subjects the plugin announces. Consumers (operator UI's
 # Queue panel) resolve the addressing below against the
@@ -436,7 +436,7 @@ Where each QueueItem is:
   "album":        string | null,
   "duration_ms":  u64 | null,
   "available":    bool,           // derived from evo:available sticker + source state
-  "artwork_url":  string          // /api/v1/audio/artwork?scheme=mpd-path&value=<url-encoded uri>
+  "artwork_url":  string          // /api/v1/audio/artwork?scheme=<scheme>&value=<url-encoded value>
 }
 ```
 

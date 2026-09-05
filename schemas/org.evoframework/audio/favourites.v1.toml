@@ -187,7 +187,7 @@ detail = "When the per-item availability truth has not yet been determined — t
 
 [[acceptance]]
 name = "favourites-item-carries-artwork-url"
-detail = "Every FavouriteItem in the `audio_favourites` envelope's `items` array MUST carry an `artwork_url` field of shape `/api/v1/audio/artwork?scheme=mpd-path&value=<url-encoded uri>`. The URL is target-addressed; UI consumers append `&size=...` per their render target. Percent-encoding follows RFC 3986 unreserved-set rules. See `audio.playback.v1` acceptance row `now-playing-track-carries-artwork-url` for the full cascade contract."
+detail = "Every FavouriteItem in the `audio_favourites` envelope's `items` array MUST carry an `artwork_url` field of shape `/api/v1/audio/artwork?scheme=<scheme>&value=<url-encoded value>`. The scheme is envelope data chosen by the publisher, not a schema constant; `mpd-path` is the common case for a file URI, and consumers MUST read the scheme from the URL rather than assume it. The URL is target-addressed; UI consumers append `&size=...` per their render target. Percent-encoding follows RFC 3986 unreserved-set rules. See `audio.playback.v1` acceptance row `now-playing-track-carries-artwork-url` for the full cascade contract."
 
 [[subjects]]
 addressing = { scheme = "evo.audio.favourites", value = "set" }
@@ -222,7 +222,7 @@ Where each FavouriteItem is:
   "duration_ms":  u64 | null,
   "available":    bool | null,
   "added_at_ms":  u64 | null,
-  "artwork_url":  string  // /api/v1/audio/artwork?scheme=mpd-path&value=<url-encoded uri>
+  "artwork_url":  string  // /api/v1/audio/artwork?scheme=<scheme>&value=<url-encoded value>
 }
 ```
 

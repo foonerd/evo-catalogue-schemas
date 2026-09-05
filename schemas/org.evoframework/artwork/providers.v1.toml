@@ -39,15 +39,18 @@ Request payload (v1):
 ```json
 {
   "v": 1,
-  "target": { "scheme": "mpd-path", "value": "<external-addressing value>" },
+  "target": { "scheme": "<scheme>", "value": "<external-addressing value>" },
   "size": "tiny" | "medium" | "large" | "original"
 }
 ```
 
-`target.scheme` mirrors the external-addressing scheme strings
-published by the playback warden (`mpd-path` for a file URI,
-`mpd-album` for the compound `"{artist}|{album}"` shape).
-`target.value` is the scheme-specific opaque value.
+`target.scheme` is caller data, not a value this schema
+freezes. It mirrors whatever external-addressing scheme strings
+the publisher uses — `mpd-path` for a file URI and `mpd-album`
+for the compound `"{artist}|{album}"` shape are the common cases,
+not the permitted set. A provider MUST treat an unrecognised
+scheme as a miss rather than an error. `target.value` is the
+scheme-specific opaque value.
 
 `size` is optional; defaults to `"original"` when absent. The
 taxonomy matches the operator-UI's render targets at 2x retina
@@ -75,8 +78,10 @@ Response payload (v1):
 
 On `status = "ok"`:
 - `content_hash` is the SHA-256 (lowercase 64-hex) of the
-  resolved variant's bytes, matching the framework's
-  `/api/v1/audio/artwork/:content_hash` endpoint address shape.
+  resolved variant's bytes. The hash GET that serves them
+  (`/api/v1/audio/artwork/<content_hash>`) is a distribution
+  contract, mounted by the distribution that ships artwork; this
+  schema names the hash, not the route's owner.
 - `mime` is `image/webp` for resized variants (per the
   reference plugin's transcoding posture) or the source MIME
   for `original`.
@@ -109,7 +114,7 @@ detail = "Each size variant (tiny / medium / large / original) for the same targ
 
 [[acceptance]]
 name = "resolve-populates-asset-cache"
-detail = "When status=\"ok\" and the framework wired LoadContext.asset_cache, the plugin MUST push the resolved bytes into the cache under the returned content_hash before responding. The framework's `/api/v1/audio/artwork/:content_hash` endpoint serves whatever lands here; absent cache writes the endpoint returns 404 and consumers fall back per the universal artwork-first-or-icon rule."
+detail = "When status=\"ok\" and the framework wired LoadContext.asset_cache, the plugin MUST push the resolved bytes into the cache under the returned content_hash before responding. The distribution's hash GET (`/api/v1/audio/artwork/<content_hash>`) serves whatever lands here; absent cache writes it returns 404 and consumers fall back per the universal artwork-first-or-icon rule."
 
 [[acceptance]]
 name = "resolve-size-unknown-is-bad-request"

@@ -7,6 +7,36 @@ versioning follows [Semver](https://semver.org).
 
 ## [Unreleased]
 
+### Changed — artwork server ownership and the `artwork_url` scheme (v0.2.0 candidate)
+
+- `schemas/org.evoframework/audio/playback.v1.toml` — the
+  `now-playing-track-carries-artwork-url` row described the resolve
+  endpoint as the framework's. It is a distribution HTTP surface,
+  mounted by the distribution that ships artwork. The path is
+  unchanged (`/api/v1/audio/artwork`), the dispatch-via-shelf and
+  302-to-content-hash behaviour is unchanged; only the owner named in
+  the contract is corrected.
+- `schemas/org.evoframework/audio/library.v1.toml`,
+  `playlist.v1.toml`, `favourites.v1.toml`, `queue.v1.toml` — these
+  required `artwork_url` to be `scheme=mpd-path`. The shape is
+  `scheme=<scheme>&value=<value>`: the scheme is envelope data chosen
+  by the publisher, not a schema constant. `mpd-path` stays as the
+  common example. Consumers MUST read the scheme from the URL rather
+  than assume it. This makes the contract match shipped behaviour —
+  publishers already emit other schemes for artist and directory
+  targets, which the old MUST contradicted.
+- `schemas/org.evoframework/artwork/providers.v1.toml` — stopped
+  freezing `target.scheme` to `mpd-path` in the request shape; it is
+  caller data, with an unrecognised scheme handled as a miss rather
+  than an error. The content-hash GET
+  (`/api/v1/audio/artwork/<content_hash>`) is named as a distribution
+  contract rather than a framework endpoint; the hash itself is what
+  this schema pins.
+
+No shape bump — every change is to contract prose, not to any
+declared envelope, request_type, or subject.
+
+
 ### Added — `audio.terminus` v1 spectrum-demand control plane (v0.2.0 candidate)
 
 - `schemas/org.evoframework/audio/terminus.v1.toml` — declared the `audio.spectrum.set_demand` request-type + the `audio_playback_spectrum_demand` subject (addressing `evo.audio.playback:spectrum_demand`) + the `spectrum-demand-drives-producer-park-and-shape` acceptance row. The demand subject is the sole production-truth surface for the terminus producer; `enabled=false` MUST close the plugin's ALSA capture PCM (rig-verifiable via `lsof -p <pid>`), idle the outer capture loop, and stop `emit_frame`. Renderer-only fields (`preset`, `palette`, `color_mode`, `sensitivity_db`) MUST NOT reach the demand subject; the UI folds `preset=off` into `enabled=false` at the settings layer so `enabled` is the single production-truth field. `bins ∈ {32, 64, 128, 256}` and `channels ∈ {1, 2}` enums refused with structured Permanent outside the enum. `rate_hz_target` clamped `[1, 60]`. Apply path is the F1-A runtime bridge: evo-ui-runtime derives the demand-write from any `ui.visualizer.{enabled, bin_count, channel_mode}` settings patch and calls the verb — every settings origin inherits the demand-write by construction. No shape bump — additive to the v1 schema. Reference plugin: `org.evoframework.audio.terminus` in evo-device-audio (module `demand.rs` + living inventory `plugins/org.evoframework.audio.terminus/docs/SPECTRUM-DEMAND.md`).

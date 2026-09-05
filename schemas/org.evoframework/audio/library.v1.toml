@@ -501,7 +501,7 @@ detail = "Every BrowseEntry of kind `file` MUST project the 13 classical-music m
 
 [[acceptance]]
 name = "library-browse-file-carries-artwork-url"
-detail = "Every BrowseEntry of kind `file` MUST carry an `artwork_url` field of shape `/api/v1/audio/artwork?scheme=mpd-path&value=<url-encoded uri>`. Directory and playlist BrowseEntry kinds do NOT carry artwork_url (the operator UI's directory / playlist tiles render via different artwork-resolution surfaces — directory artwork resolves to the first track's cover; playlist tiles render generic icons). The URL is target-addressed; UI consumers append `&size=...` per their render target. Percent-encoding follows RFC 3986 unreserved-set rules. See `audio.playback.v1` acceptance row `now-playing-track-carries-artwork-url` for the full cascade contract."
+detail = "Every BrowseEntry of kind `file` MUST carry an `artwork_url` field of shape `/api/v1/audio/artwork?scheme=<scheme>&value=<url-encoded value>`. The scheme is envelope data chosen by the publisher, not a schema constant; `mpd-path` is the common case for a file URI, and consumers MUST read the scheme from the URL rather than assume it. Directory and playlist BrowseEntry kinds do NOT carry artwork_url (the operator UI's directory / playlist tiles render via different artwork-resolution surfaces — directory artwork resolves to the first track's cover; playlist tiles render generic icons). The URL is target-addressed; UI consumers append `&size=...` per their render target. Percent-encoding follows RFC 3986 unreserved-set rules. See `audio.playback.v1` acceptance row `now-playing-track-carries-artwork-url` for the full cascade contract."
 
 [[acceptance]]
 name = "library-triage-subject-published-on-load-and-every-sweep"
