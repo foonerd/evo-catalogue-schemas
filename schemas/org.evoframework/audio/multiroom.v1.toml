@@ -242,7 +242,7 @@ description = "Wall-clock timestamp of the last envelope refresh. Operator surfa
 [[subjects.record_types.track_summary]]
 name = "artwork_url"
 type = "option<string>"
-description = "URL of the track artwork. Served by the framework's HTTPS artwork endpoint with a size discriminator on the URL path (the multi-size pipeline). None falls back to the theme placeholder per the artwork-first-or-icon rule."
+description = "URL of the track artwork. Served by the distribution's HTTPS artwork endpoint, mounted by the distribution that ships artwork, with a size discriminator on the URL path (the multi-size pipeline). None falls back to the theme placeholder per the artwork-first-or-icon rule."
 
 [[subjects.record_types.track_summary]]
 name = "title"
