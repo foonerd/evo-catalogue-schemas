@@ -42,7 +42,7 @@ start/stop, systemd-logind inhibitor), and returns the
 applied state so the operator UI can render the new value
 without a follow-up read.
 
-The eight-verb surface covers the on-glass Settings screen
+The ten-verb surface covers the on-glass Settings screen
 plus the touch-calibration launch bridge (which touches a
 well-known trigger file the compositor watches; the
 compositor picks up the file, runs the calibration wizard
@@ -202,6 +202,50 @@ Requires the `system_admin` capability scope.
 """
 
 [[requests]]
+request_type = "set_osk"
+description = """
+Turn the on-screen keyboard on or off. Payload is
+`{ enabled: bool }`.
+
+Returns `{ ok: true, osk_enabled: bool }` echoing the
+persisted choice.
+
+The verb writes the operator's choice and nothing else. The
+kiosk-side watcher observes that write and starts or stops
+the keyboard, so there is one writer and one applier rather
+than two things racing to own a process. The bool is the
+operator's question — keyboard, yes or no — and the engine
+that provides it is deliberately not on the wire, so
+changing the engine is not a wire break.
+
+Requires the `system_admin` capability scope. Deliberately
+not step-up: the on-screen keyboard is what a touch
+operator would type a step-up password with, so gating it
+behind step-up can lock them out of their own glass.
+"""
+
+[[requests]]
+request_type = "set_cursor"
+description = """
+Show or hide the mouse pointer. Payload is
+`{ visible: bool }`.
+
+Returns `{ ok: true, cursor_visible: bool }` echoing the
+persisted choice.
+
+Pointer visibility is decided by which cursor theme the
+compositor loads, and a compositor reads that once at
+startup. The verb therefore persists the choice and
+restarts the kiosk session to apply it; the operator sees a
+brief flash as the session returns. A session that is not
+running is left stopped — the choice still applies at the
+next start.
+
+Requires the `system_admin` capability scope, and not
+step-up, for the same reason as the keyboard.
+"""
+
+[[requests]]
 request_type = "get_display_state"
 description = """
 Read the current display state. Payload MUST be the empty
@@ -228,7 +272,7 @@ detail = "Only one plugin may claim the `system.kiosk` shelf at a time. The refe
 
 [[acceptance]]
 name = "kiosk-writer-verbs-require-system-admin-scope"
-detail = "Every writer verb (`set_display_rotation`, `set_touch_calibration`, `launch_touch_calibration`, `set_enabled`, `set_brightness`, `set_sleep_timeout`, `set_sleep_inhibit_while_playing`) MUST require the `system_admin` capability scope declared via the manifest's `[capabilities.respondent.verb_capabilities]` map. The read verb `get_display_state` MUST NOT require the scope — the operator UI's Settings screen renders the current state on connect for every authenticated principal, even before elevation. Reviewers reject changes that move the capability boundary."
+detail = "Every writer verb (`set_display_rotation`, `set_touch_calibration`, `launch_touch_calibration`, `set_enabled`, `set_brightness`, `set_sleep_timeout`, `set_sleep_inhibit_while_playing`, `set_osk`, `set_cursor`) MUST require the `system_admin` capability scope declared via the manifest's `[capabilities.respondent.verb_capabilities]` map. The read verb `get_display_state` MUST NOT require the scope — the operator UI's Settings screen renders the current state on connect for every authenticated principal, even before elevation. Reviewers reject changes that move the capability boundary."
 
 [[acceptance]]
 name = "kiosk-persist-before-apply-on-write-verbs"
