@@ -22,7 +22,12 @@ done
 # excluding it is the only way the script can co-exist with the gate.
 EXCLUDE_ARGS=(
     "--exclude-dir=node_modules"
+    # The guard family: this script encodes the patterns it scans
+    # for, and the control beside it carries the samples it plants
+    # to prove each class fires. Excluding both by exact filename is
+    # the only way either can co-exist with the gate.
     "--exclude=check-public-leaks.sh"
+    "--exclude=check-public-leaks-positive.sh"
 )
 
 EXISTING_PATHS=()
