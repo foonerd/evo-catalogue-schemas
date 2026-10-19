@@ -85,8 +85,8 @@ Return the current settings projection: resampling /
 mixer_type / mixer_device / mixer_control / dop /
 output_device / volume_normalization / startup_volume_percent /
 max_volume_percent / volume_curve / exclusive_mode /
-crossfade_seconds / gapless. Operator-facing read verb;
-idempotent.
+crossfade_seconds / gapless / composition_mode. Operator-facing
+read verb; idempotent.
 """
 payload_in = "tbd-review"
 payload_out = "tbd-review"
@@ -335,6 +335,30 @@ configures them independently. Defaults are flat (all bands
 at 1 kHz / 0 dB / Q=1.0) so an operator engaging EQ without
 configuring bands hears no change — the audiophile-grade
 "do no harm" default.
+"""
+payload_in = "tbd-review"
+payload_out = "tbd-review"
+
+[[requests]]
+request_type = "options.set_composition_mode"
+description = """
+Record which composition mode is active, so the operator's
+glass can read it at mount from the settings subject it
+already holds rather than asking a second shelf.
+
+Payload shape: `{ v: 1, mode: String }`. The value is a mode
+token declared by the `audio.composition` shelf — `passthrough`
+or `eq_only` in this shape; `resampler` is reserved and not
+yet implemented. A token the composition shelf does not
+declare is refused.
+
+Written by the composition plugin, not by the glass: the
+composition shelf owns which mode is active and is the only
+party that knows when it changed, including the mode it
+restores from its own state at load. The glass reads this
+field and never writes it. Idempotent — recording the mode
+that is already recorded changes nothing and republishes
+nothing.
 """
 payload_in = "tbd-review"
 payload_out = "tbd-review"
