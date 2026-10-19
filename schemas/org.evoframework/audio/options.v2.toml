@@ -189,10 +189,27 @@ payload_out = "tbd-review"
 [[requests]]
 request_type = "options.set_volume_normalization"
 description = """
-Set the volume normalisation policy (`disabled` /
-`track` / `album` / `loudness_lufs`). Persists; updates
-the subject. Playback wardens (e.g. playback.mpd)
-re-evaluate per-track on the next play.
+Set what ReplayGain does to playback. Payload shape:
+`{ v: 1, mode: String }` where mode is `disabled`, `track`
+or `album`.
+
+`disabled` plays the file as mastered. `track` levels each
+track against its own ReplayGain tag. `album` levels the
+album as one, so the quiet track on a loud record stays
+quiet. The mode is the MPD `replay_gain_mode` argument the
+playback warden applies on session init and on every change
+while a session is live — it scales the decoded stream and
+does not move the mixer or the operator's startup volume.
+
+`loudness_lufs` is reserved and not implemented in this
+shape; it is refused rather than accepted and ignored. MPD's
+own `auto` is deliberately not offered: "whichever tag
+happens to be present" is not a choice an operator can
+reason about.
+
+This field was a bool. Settings already on disk still load —
+`false` reads as `disabled`, `true` as `track`, which is what
+the bool was understood to mean.
 """
 payload_in = "tbd-review"
 payload_out = "tbd-review"
