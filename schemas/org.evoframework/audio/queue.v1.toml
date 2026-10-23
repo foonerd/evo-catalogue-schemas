@@ -6,11 +6,11 @@
 # Queue shelves host the live playback queue — the ordered list
 # of items the playback warden walks through. The shelf is
 # respondent-shaped: every operator gesture against the queue
-# (inspect, enqueue, remove, move, clear, load-from-playlist,
-# save-as-playlist) dispatches as a request. The queue's
-# live state is published as the `audio_queue` subject so
-# consumers (operator UI's Queue panel) consume via the
-# read-then-subscribe pattern.
+# (inspect, enqueue, remove, move, clear, restore-last-queue,
+# load-from-playlist, save-as-playlist) dispatches as a request.
+# The queue's live state is published as the `audio_queue`
+# subject so consumers (operator UI's Queue panel) consume via
+# the read-then-subscribe pattern.
 #
 # Reference plugin: `org.evoframework.playback.mpd` in
 # evo-device-audio. The plugin owns this shelf alongside
@@ -39,8 +39,9 @@ shape = 1
 description = """
 Live playback queue — the ordered list of items the playback
 warden walks. Operator gestures against the queue (inspect,
-enqueue, remove, move, clear, load from playlist, save as
-playlist) dispatch as requests; the live queue state is
+enqueue, remove, move, clear, restore the last queue, load
+from playlist, save as playlist) dispatch as requests; the
+live queue state is
 published as the `audio_queue` subject for read-then-subscribe
 consumers. Each item carries a per-item `available` flag
 derived from the per-song availability sticker the library
@@ -166,6 +167,40 @@ Remove every item from the queue. Empty payload accepted (no
 fields required). Stops playback if a song is currently
 playing; the queue subject's update reflects empty + null
 current_position.
+
+The queue is kept first. Before `clear` is sent, every row in
+order and the playing position (when something was playing or
+paused) are written to the plugin's state directory, so
+`queue.restore_last_queue` can put the cleared queue back. An
+empty queue is never kept over a full one: clearing an
+already-empty queue leaves the previously kept queue as the
+one to restore. A snapshot that cannot be written is reported
+and does not refuse the clear.
+"""
+
+[[requests]]
+request_type = "queue.restore_last_queue"
+description = """
+Put the last kept queue back. Empty payload accepted (bare
+envelope `{ "v": 1 }`). The kept queue is the one written
+before the most recent `queue.clear_queue`, or at the plugin's
+most recent shutdown, whichever came later — a reboot does not
+cost the operator the queue they had.
+
+The queue is replaced: `clear`, then `add` per kept row in
+order. A row MPD refuses (a path that no longer exists, a
+source that is gone) is skipped and the rest still return;
+only when every row is refused does the verb fail.
+
+The restore cues and pauses. It does not start playback. When
+the kept queue held a playing position, that row is selected
+and paused, so transport and the `now_playing` subject
+describe the restored queue and the operator presses play. A
+queue kept while stopped comes back stopped.
+
+With nothing kept the verb is refused and the queue is left
+as it stands. The queue subject and the `now_playing` subject
+are both published after a successful restore.
 """
 
 [[requests]]
@@ -358,7 +393,7 @@ detail = "Only one plugin may claim this shelf at a time. The shelf is co-owned 
 
 [[acceptance]]
 name = "queue-subject-published-on-load-and-every-mutation"
-detail = "The plugin announces the `audio_queue` subject (addressing `{ scheme = 'evo.audio.queue', value = 'queue' }`, subject_type `audio_queue`) on load and updates it on every queue mutation (enqueue, remove, move, clear, load_playlist_to_queue, append_playlist_to_queue, skip_to_next_available) and on every MPD `idle playlist` wake (covers MPD-side mutations from `clear`/`add`/`delete`/`move` called by the playback supervisor's transport path). The subject is the single source of truth for queue state; out-of-band sidecar channels are forbidden."
+detail = "The plugin announces the `audio_queue` subject (addressing `{ scheme = 'evo.audio.queue', value = 'queue' }`, subject_type `audio_queue`) on load and updates it on every queue mutation (enqueue, remove, move, clear, restore_last_queue, load_playlist_to_queue, append_playlist_to_queue, skip_to_next_available) and on every MPD `idle playlist` wake (covers MPD-side mutations from `clear`/`add`/`delete`/`move` called by the playback supervisor's transport path). The subject is the single source of truth for queue state; out-of-band sidecar channels are forbidden."
 
 [[acceptance]]
 name = "queue-item-available-flag-derives-from-sticker"
