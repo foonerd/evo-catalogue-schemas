@@ -158,12 +158,29 @@ payload_out = "empty"
 [[verbs]]
 name = "set_shuffle"
 payload_in = """
-UTF-8 ASCII boolean flag toggling shuffle (random) mode:
-`"1"` / `"true"` enables; `"0"` / `"false"` disables. Maps
-to MPD's `random on/off` primitive — when enabled, MPD plays
-queue entries in random order. Empty payload is rejected.
-State surfaces in `now_playing.shuffle` (the operator-facing
-field name; the MPD primitive is `random`).
+UTF-8 JSON payload carrying exactly one of `enabled` or
+`mode`:
+
+  { "v": 1, "enabled": bool }
+  { "v": 1, "mode": "off" | "tracks" | "albums" | "similar" }
+
+`enabled` is the fielded shape and keeps its meaning:
+`true` is track shuffle, `false` is off. `mode` names the
+shuffle by word. `tracks` maps to MPD's `random on`
+primitive — MPD plays queue entries in random order.
+`albums` and `similar` are not MPD primitives: the player
+decides the order once (albums shuffled with each album's
+tracks in order; or a weighted walk in which each next track
+is drawn against the one before it by shared artist, album,
+composer, work, performers, label, decade and length) and
+writes it into the queue, which MPD then plays in order with
+`random off`. A payload carrying both `enabled` and `mode`,
+neither, or a `mode` outside those four words is rejected.
+
+State surfaces in `now_playing.shuffle_mode` as the word
+chosen, and in `now_playing.shuffle`, which remains MPD's
+`random` flag: true under `tracks`, false under `albums` and
+under `similar`.
 """
 payload_out = "empty"
 
@@ -215,9 +232,10 @@ UTF-8 JSON payload carrying the same shape as the
 `now_playing` subject's state — `{ v, transport_state,
 track, elapsed_ms, duration_ms, volume, muted, repeat,
 shuffle, shuffle_mode, single, consume }`. `shuffle` is MPD's
-`random` flag and is false under album mode; `shuffle_mode`
-is `"off"`, `"tracks"` or `"albums"` and is the field a
-consumer reads to know how shuffle is in force. Field
+`random` flag and is false under album mode and under
+similar mode; `shuffle_mode` is `"off"`, `"tracks"`,
+`"albums"` or `"similar"` and is the field a consumer reads
+to know how shuffle is in force. Field
 semantics, null conventions, and the `mpd_path` walk to
 track/album subjects are documented under the now_playing
 subject below.
@@ -300,7 +318,7 @@ detail = "`freq_hz` must lie in 20..=20000 (audible band); refusal carries the o
 
 [[acceptance]]
 name = "now-playing-published-on-load-and-every-state-transition"
-detail = "The warden announces the `now_playing` subject (addressing `{ scheme = 'evo.audio.playback', value = 'now_playing' }`, subject_type `audio_playback_now_playing`) on load and updates it on every playback state transition (play, pause, stop, track change, seek, set_volume, set_mute, set_repeat, set_shuffle, set_single, set_consume) and on every MPD idle wake. The state payload carries `{ v, transport_state, track, elapsed_ms, duration_ms, volume, muted, repeat, shuffle, shuffle_mode, single, consume }` where `transport_state` is one of `\"playing\" | \"paused\" | \"stopped\"`, `track` is null when stopped or no current song, else `{ title, artist, album, mpd_path }` (UI walks `mpd_path` to the `track` / `album` subjects for artwork), `elapsed_ms` and `duration_ms` are null when stopped or unknown, `volume` is 0..=100, `muted` reflects the warden's mute-toggle state (not derived from `volume == 0`), `repeat / shuffle / single / consume` reflect the MPD mode primitives, and `shuffle_mode` is one of `\"off\" | \"tracks\" | \"albums\"` — the shuffle the operator asked for, which MPD's status cannot report. `shuffle` remains MPD's `random` flag: it is true under track shuffle and false under album mode, because album order is written into the queue and MPD plays the queue in order. A consumer that reads only `shuffle` sees \"not shuffling\" while album shuffle is in force; it MUST read `shuffle_mode`. The subject is the single source of truth for transition deltas; out-of-band sidecar channels are forbidden. NOTE: the framework's subject-subscribe machinery does NOT replay the current state as the first event to a new subscriber — `subject_state_changed` fires only on subsequent transitions. Consumers needing first-render state use the `get_now_playing` read verb (see verbs section) in the canonical read-then-subscribe shape: read once on connect for the initial frame, subscribe to the subject for deltas. Live elapsed-ms advancement between transitions is consumer-side: the consumer interpolates locally from the last reported `elapsed_ms` + wall-clock while `transport_state == \"playing\"`."
+detail = "The warden announces the `now_playing` subject (addressing `{ scheme = 'evo.audio.playback', value = 'now_playing' }`, subject_type `audio_playback_now_playing`) on load and updates it on every playback state transition (play, pause, stop, track change, seek, set_volume, set_mute, set_repeat, set_shuffle, set_single, set_consume) and on every MPD idle wake. The state payload carries `{ v, transport_state, track, elapsed_ms, duration_ms, volume, muted, repeat, shuffle, shuffle_mode, single, consume }` where `transport_state` is one of `\"playing\" | \"paused\" | \"stopped\"`, `track` is null when stopped or no current song, else `{ title, artist, album, mpd_path }` (UI walks `mpd_path` to the `track` / `album` subjects for artwork), `elapsed_ms` and `duration_ms` are null when stopped or unknown, `volume` is 0..=100, `muted` reflects the warden's mute-toggle state (not derived from `volume == 0`), `repeat / shuffle / single / consume` reflect the MPD mode primitives, and `shuffle_mode` is one of `\"off\" | \"tracks\" | \"albums\" | \"similar\"` — the shuffle the operator asked for, which MPD's status cannot report. `shuffle` remains MPD's `random` flag: it is true under track shuffle and false under album mode and under similar mode, because in both of those the order is written into the queue and MPD plays the queue in order. A consumer that reads only `shuffle` sees \"not shuffling\" while album or similar shuffle is in force; it MUST read `shuffle_mode`. The subject is the single source of truth for transition deltas; out-of-band sidecar channels are forbidden. NOTE: the framework's subject-subscribe machinery does NOT replay the current state as the first event to a new subscriber — `subject_state_changed` fires only on subsequent transitions. Consumers needing first-render state use the `get_now_playing` read verb (see verbs section) in the canonical read-then-subscribe shape: read once on connect for the initial frame, subscribe to the subject for deltas. Live elapsed-ms advancement between transitions is consumer-side: the consumer interpolates locally from the last reported `elapsed_ms` + wall-clock while `transport_state == \"playing\"`."
 
 [[acceptance]]
 name = "get-now-playing-read-verb-supports-first-render"
@@ -360,18 +378,20 @@ Payload shape (v1):
     "muted":       bool,
     "repeat":      bool,
     "shuffle":     bool,               // MPD's `random` mode
-    "shuffle_mode": "off" | "tracks" | "albums",
+    "shuffle_mode": "off" | "tracks" | "albums" | "similar",
     "single":      bool,               // single-track stop / loop
     "consume":     bool                // remove-on-play
   }
 
 `shuffle_mode` is the shuffle the operator asked for. MPD has
-no album mode: album order is written into the queue and MPD
-plays the queue in order, so `shuffle` — which remains MPD's
-`random` flag, unchanged — is true under track shuffle and
-false under album mode. A consumer that reads only `shuffle`
-sees "not shuffling" while album shuffle is in force; it MUST
-read `shuffle_mode` to render the control.
+no album mode and no similar mode: for both, the order is
+decided once by the player and written into the queue, and
+MPD plays the queue in order. So `shuffle` — which remains
+MPD's `random` flag, unchanged — is true under track shuffle
+and false under album mode and under similar mode. A consumer
+that reads only `shuffle` sees "not shuffling" while album or
+similar shuffle is in force; it MUST read `shuffle_mode` to
+render the control.
 
 `track` is null when stopped or when MPD reports no current
 song. `elapsed_ms` and `duration_ms` are null when stopped or
