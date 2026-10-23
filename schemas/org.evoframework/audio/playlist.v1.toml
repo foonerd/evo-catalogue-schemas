@@ -35,7 +35,9 @@ reflects current source state when loaded to the queue.
 Distinct from the live queue (audio.queue): a playlist is
 intent + identity; the queue is the current playback ordering.
 `queue.load_playlist_to_queue` materialises a playlist into
-the queue.
+the queue. `playlist.import_file` reads a `.m3u`, `.pls` or
+`.cue` file into a new playlist; a `.cue` is read, never
+written beside the music.
 """
 
 [[requests]]
@@ -251,6 +253,98 @@ Zero-match selections respond with `status: "empty"` and leave
 the playlist intact — no atomic clear on Create.
 """
 
+[[requests]]
+request_type = "playlist.import_file"
+description = """
+Import a playlist file — `.m3u` / `.m3u8`, `.pls` or `.cue` —
+into a new stored playlist. Payload:
+```
+{
+  "v":         1,
+  "name":      string,
+  "format":    "m3u" | "pls" | "cue" | null,
+  "path":      string | null,
+  "content":   string | null,
+  "base":      string | null,
+  "overwrite": bool
+}
+```
+
+Exactly one of `path` and `content` is given. `path` names a
+file the operator uploaded to the device, relative to the
+uploads directory (`/var/lib/evo/uploads`) and confined to it:
+an absolute name, a drive prefix or `..` is refused, as is a
+file over one megabyte. `content` is the file's text sent
+inline by a consumer that read the file itself. `format` may
+be omitted when `path` carries one of the four extensions; it
+is required with `content`.
+
+What each format yields:
+
+- **M3U** — one row per location line; `#EXTINF:<secs>,<title>`
+  names the row after it; other `#` lines are comments.
+- **PLS** — rows from `FileN=` in `N` order, `TitleN=` attached
+  by `N`; a file without a `[playlist]` section is refused.
+- **CUE** — one row per distinct `FILE`, in sheet order. Every
+  `TRACK` is read — number, `TITLE`, `PERFORMER`, its `FILE`,
+  and `INDEX 01` as milliseconds at 75 frames a second — and
+  returned in the response. A stored playlist cannot carry a
+  time range, so the playlist holds the audio file each track
+  belongs to, once per file.
+
+A `.cue` is read, not written. The plugin never writes a cue
+sheet, or anything else, beside the music: a cue next to its
+audio file is MPD's to find, and dropping one there would
+change the operator's library tree under them. The upload is
+read where it lies and left there. The only write this verb
+makes is MPD's own `playlistadd`, into MPD's playlist
+directory.
+
+Rows are resolved before MPD is touched. An absolute path
+under the library becomes MPD-relative; one outside the
+library is skipped. A relative path is MPD-relative, under
+`base` when given (the MPD-relative directory the playlist
+was written next to). `..` is refused. `http://` / `https://`
+streams and `dlna:` identities pass as they are. Backslashes
+are separators.
+
+Refused before any write: an invalid name (see
+`playlist-create-name-bounds`), the favourites playlist's
+name (with or without `overwrite`), both or neither of `path`
+/ `content`, an unknown format, an unreadable upload, text
+that does not parse, and a file none of whose rows resolve. A
+name already in use is refused unless `overwrite` is true, in
+which case the existing playlist is emptied first.
+
+Rows are written one `playlistadd` at a time so that one row
+MPD refuses (a path not in its database) is skipped and
+reported while the rest go in; the verb fails only when MPD
+refuses every row. This is the stated exception to
+`playlist-mutation-atomicity`: an import is a best-effort
+copy of someone else's file, and the operator is told which
+rows did not come across.
+
+Response:
+```
+{
+  "v":        1,
+  "status":   "ok" | "partial",
+  "name":     string,
+  "format":   "m3u" | "pls" | "cue",
+  "parsed":   u32,
+  "imported": u32,
+  "skipped":  [ { "entry": string, "reason": string } ],
+  "tracks":   [ { "number": u32, "title": string | null,
+                  "performer": string | null, "file": string,
+                  "start_ms": u64 } ]
+}
+```
+`tracks` is empty for M3U and PLS. The index subject is
+published after a successful import. The imported playlist
+reaches the queue through `queue.load_playlist_to_queue`, as
+any playlist does.
+"""
+
 [[acceptance]]
 name = "playlist-respondent-cardinality"
 detail = "Only one plugin may claim this shelf at a time. Co-owned with audio.playback / audio.queue / audio.favourites / audio.library by org.evoframework.playback.mpd in the reference distribution."
@@ -261,7 +355,7 @@ detail = "MPD's stored-playlist namespace (`listplaylists`, `playlistinfo NAME`,
 
 [[acceptance]]
 name = "playlist-index-subject-published-on-load-and-every-mutation"
-detail = "The plugin announces the `audio_playlist_index` subject (addressing `{ scheme = 'evo.audio.playlist', value = 'index' }`, subject_type `audio_playlist_index`) on load and updates it on every playlist mutation (create, delete, rename, add_to, remove_from, move_in) and on every MPD `idle stored_playlist` wake (covers external MPD playlist edits if any operator path bypasses the framework verbs). The subject is the single source of truth for the playlist index; out-of-band sidecar channels are forbidden."
+detail = "The plugin announces the `audio_playlist_index` subject (addressing `{ scheme = 'evo.audio.playlist', value = 'index' }`, subject_type `audio_playlist_index`) on load and updates it on every playlist mutation (create, delete, rename, add_to, remove_from, move_in, save_selection, import_file) and on every MPD `idle stored_playlist` wake (covers external MPD playlist edits if any operator path bypasses the framework verbs). The subject is the single source of truth for the playlist index; out-of-band sidecar channels are forbidden."
 
 [[acceptance]]
 name = "playlist-create-name-bounds"
@@ -277,7 +371,7 @@ detail = "Mixed-source playlists with entries from offline sources MUST load eve
 
 [[acceptance]]
 name = "playlist-mutation-atomicity"
-detail = "Bulk operations (`add_to_playlist` with multi-URI payload, `remove_from_playlist` with multi-position payload) MUST be atomic against MPD's playlist file. The plugin uses MPD's `command_list_begin` / `command_list_end` (or equivalent batched primitive) to commit the bulk change in one playlist-write; partial application on failure is forbidden. On batched-write failure, the playlist reverts to its pre-call state."
+detail = "Bulk operations (`add_to_playlist` with multi-URI payload, `remove_from_playlist` with multi-position payload) MUST be atomic against MPD's playlist file. The plugin uses MPD's `command_list_begin` / `command_list_end` (or equivalent batched primitive) to commit the bulk change in one playlist-write; partial application on failure is forbidden. On batched-write failure, the playlist reverts to its pre-call state. `playlist.import_file` is the stated exception: it copies someone else's file row by row so that a row MPD refuses is skipped and reported while the rest go in, and its response names every row that did not come across."
 
 [[acceptance]]
 name = "playlist-index-counts-reflect-mpd-truth"
