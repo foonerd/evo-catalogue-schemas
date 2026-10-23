@@ -37,7 +37,9 @@ intent + identity; the queue is the current playback ordering.
 `queue.load_playlist_to_queue` materialises a playlist into
 the queue. `playlist.import_file` reads a `.m3u`, `.pls` or
 `.cue` file into a new playlist; a `.cue` is read, never
-written beside the music.
+written beside the music. `playlist.export_file` returns a
+playlist as `.m3u` or `.pls` text for download; nothing is
+written into the music directory.
 """
 
 [[requests]]
@@ -343,6 +345,67 @@ Response:
 published after a successful import. The imported playlist
 reaches the queue through `queue.load_playlist_to_queue`, as
 any playlist does.
+"""
+
+[[requests]]
+request_type = "playlist.export_file"
+description = """
+Export a stored playlist as the text of a `.m3u` or `.pls`
+file, for the consumer to offer as a download. Payload:
+```
+{
+  "v":        1,
+  "name":     string,
+  "format":   "m3u" | "pls",
+  "absolute": bool
+}
+```
+`format` defaults to `m3u`; `absolute` defaults to `false`.
+
+What each format carries:
+
+- **M3U** — the extended form: `#EXTM3U`, `#PLAYLIST:<name>`,
+  then per row `#EXTINF:<secs>,<name>` and the row's location.
+  LF line ends, UTF-8, no byte-order mark.
+- **PLS** — `[playlist]`, then `FileN`, `TitleN`, `LengthN` per
+  row numbered from one, `NumberOfEntries`, `Version=2`.
+
+A row is named `Artist - Title`, the title alone, or the file's
+stem when no tag names it. An unknown length is `-1`, the
+value both formats use. With `absolute` true, library rows are
+written as absolute paths under MPD's music directory, for a
+player that reads the same share; off, they are MPD-relative
+as the playlist holds them. `http://` / `https://` streams and
+`dlna:` identities are written as they are either way.
+
+There is no `.cue` export: a cue sheet describes one audio
+file's tracks, which a playlist is not.
+
+Nothing is written into the music directory, or anywhere
+else on the device. The verb reads the playlist from MPD and
+returns the text; the bytes go to the consumer and nowhere
+else. It is read-only: no playlist is changed and no subject
+is published. Refusals: an invalid name (see
+`playlist-create-name-bounds`), and a playlist that does not
+exist.
+
+Response:
+```
+{
+  "v":        1,
+  "name":     string,
+  "format":   "m3u" | "pls",
+  "filename": string,
+  "entries":  u32,
+  "content":  string
+}
+```
+`filename` is `<name>.<m3u|pls>`; a playlist name is already a
+legal file name. `content` is the file's text.
+
+This exports a stored playlist. Saving the live queue as a
+playlist is `queue.save_queue_as_playlist` on the queue shelf,
+a different verb.
 """
 
 [[acceptance]]
