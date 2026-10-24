@@ -39,7 +39,8 @@ the queue. `playlist.import_file` reads a `.m3u`, `.pls` or
 `.cue` file into a new playlist; a `.cue` is read, never
 written beside the music. `playlist.export_file` returns a
 playlist as `.m3u` or `.pls` text for download; nothing is
-written into the music directory.
+written into the music directory. `playlist.duplicate` copies
+a stored playlist under a new name.
 """
 
 [[requests]]
@@ -408,6 +409,46 @@ playlist is `queue.save_queue_as_playlist` on the queue shelf,
 a different verb.
 """
 
+[[requests]]
+request_type = "playlist.duplicate"
+description = """
+Copy a stored playlist under a new name. Payload is
+`{ v: 1, source: string, target: string }`. One stored
+playlist becomes two: `source` keeps its rows in their order
+and is never written; `target` is a new stored playlist
+holding the same rows.
+
+Refused before any write: an invalid name on either side (see
+`playlist-create-name-bounds`); a `target` that already
+exists — a duplicate never overwrites, and the existing
+playlist is left as it was; the same name on both sides; the
+favourites playlist as `source` or as `target` (see
+`playlist-deletion-protects-system-managed-favourites`; its
+lifecycle is the favourites shelf's); a `source` that does not
+exist. An empty `source` duplicates to an empty playlist.
+
+The rows are written through MPD's own `playlistadd`, sent as
+one command list — one round trip. A command list is not a
+transaction: MPD applies each row as it goes, and when a row
+is refused the rows before it have landed under the new name
+and the rest do not run. When that happens the name this call
+created is removed, the error is returned, and the index is
+published after that removal, so the next attempt is not
+refused for a name that is only half there. When that removal
+itself fails, the error is still returned and the name can
+remain, listed with part of the rows; the plugin reports it.
+
+Nothing is written into the music directory, or to any file:
+the only write is MPD's, into its playlist directory.
+
+The answer is the shelf's plain ok, `{ v: 1, status: "ok" }`.
+The index subject is published after a successful copy.
+
+This copies a stored playlist. Renaming one is
+`playlist.rename_playlist`; saving the live queue as one is
+`queue.save_queue_as_playlist` on the queue shelf.
+"""
+
 [[acceptance]]
 name = "playlist-respondent-cardinality"
 detail = "Only one plugin may claim this shelf at a time. Co-owned with audio.playback / audio.queue / audio.favourites / audio.library by org.evoframework.playback.mpd in the reference distribution."
@@ -418,7 +459,7 @@ detail = "MPD's stored-playlist namespace (`listplaylists`, `playlistinfo NAME`,
 
 [[acceptance]]
 name = "playlist-index-subject-published-on-load-and-every-mutation"
-detail = "The plugin announces the `audio_playlist_index` subject (addressing `{ scheme = 'evo.audio.playlist', value = 'index' }`, subject_type `audio_playlist_index`) on load and updates it on every playlist mutation (create, delete, rename, add_to, remove_from, move_in, save_selection, import_file) and on every MPD `idle stored_playlist` wake (covers external MPD playlist edits if any operator path bypasses the framework verbs). The subject is the single source of truth for the playlist index; out-of-band sidecar channels are forbidden."
+detail = "The plugin announces the `audio_playlist_index` subject (addressing `{ scheme = 'evo.audio.playlist', value = 'index' }`, subject_type `audio_playlist_index`) on load and updates it on every playlist mutation (create, delete, rename, add_to, remove_from, move_in, save_selection, import_file, duplicate) and on every MPD `idle stored_playlist` wake (covers external MPD playlist edits if any operator path bypasses the framework verbs). The subject is the single source of truth for the playlist index; out-of-band sidecar channels are forbidden."
 
 [[acceptance]]
 name = "playlist-create-name-bounds"
