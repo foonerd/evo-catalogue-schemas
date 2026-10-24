@@ -64,7 +64,9 @@ hundred finished tracks, newest first, and
 once, highest count first; both are reads of the plugin's own
 record and publish nothing. `library.forget_track` takes one
 track out of what browse, search and those two reads return,
-leaving the file, the source and the live queue as they are.
+leaving the file, the source and the live queue as they are;
+`library.forget_album` does the same for every current track
+of one album, through the same set.
 """
 
 # ----- Source-registration verbs -----
@@ -521,6 +523,43 @@ After the answer, `library.browse_library`, the facet drills
 `library.recently_played` and `library.most_played` do not
 return that URI. `library.list_works` and
 `library.get_work_recordings` still list it.
+
+The verb publishes no subject.
+"""
+
+[[requests]]
+request_type = "library.forget_album"
+description = """
+Take every track of one album out of the library the operator
+browses. Payload is `{ v: 1, album: string, parent?: { tag:
+string, value: string } }`. `album` is the identity
+`library.browse_by_album` already drills: the tile's `album_id`
+or its display title. `parent` is the same optional artist
+context that drill takes, and no other shape. An empty `album`
+is refused. An album that resolves to no track is refused.
+
+The answer is
+`{ v: 1, status: "ok", album: string, forgotten: [string],
+newly_forgotten: u32, already_forgotten: u32 }`. `forgotten` is
+the track URIs the drill would list now. Each of them is
+forgotten through the set `library.forget_track` keeps — there
+is one set — and a track forgotten this way is already
+forgotten for that verb.
+
+The files stay on disk. The source stays registered — this is
+not `library.remove_source`. The live queue is left as it is;
+the verb's only MPD traffic is the drill's own read. A library
+update does not bring those tracks back. A file added to that
+album later is not forgotten: the set holds URIs, not the
+folder.
+
+After the answer, `library.browse_library`, the facet drills,
+`library.search_library`, `library.recently_played` and
+`library.most_played` omit those URIs. The album tile is
+omitted from `library.browse_by_album`'s list when none of its
+tracks remain, and a tile that still has tracks counts only
+those in `track_count`. `library.list_works` and
+`library.get_work_recordings` still list a forgotten track.
 
 The verb publishes no subject.
 """
