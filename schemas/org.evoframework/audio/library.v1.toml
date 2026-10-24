@@ -62,7 +62,9 @@ Play history. `library.recently_played` answers the last
 hundred finished tracks, newest first, and
 `library.most_played` every track that has finished at least
 once, highest count first; both are reads of the plugin's own
-record and publish nothing.
+record and publish nothing. `library.forget_track` takes one
+track out of what browse, search and those two reads return,
+leaving the file, the source and the live queue as they are.
 """
 
 # ----- Source-registration verbs -----
@@ -493,6 +495,34 @@ that list. What counts as a play is as for
 
 The read is read-only: nothing is written into the music
 directory, and no subject is published.
+"""
+
+# ----- Forgetting a track -----
+
+[[requests]]
+request_type = "library.forget_track"
+description = """
+Take one track out of the library the operator browses. Payload
+is `{ v: 1, uri: string }`; the URI is the one the queue uses.
+An empty URI is refused. The answer is
+`{ v: 1, status: "ok", uri: string, already_forgotten: bool }`;
+forgetting a track that is already forgotten is that same
+answer with `already_forgotten` true.
+
+The file stays on disk. The source stays registered — this is
+not `library.remove_source`. The live queue is left as it is.
+A library update does not bring the track back. The forgotten
+set is the plugin's own state, under its state directory, and
+survives a restart; when that file cannot be written the verb
+still answers ok and the set is only in memory, reported.
+
+After the answer, `library.browse_library`, the facet drills
+(`library.browse_by_*` with a selector), `library.search_library`,
+`library.recently_played` and `library.most_played` do not
+return that URI. `library.list_works` and
+`library.get_work_recordings` still list it.
+
+The verb publishes no subject.
 """
 
 # ----- Acceptance rows -----
