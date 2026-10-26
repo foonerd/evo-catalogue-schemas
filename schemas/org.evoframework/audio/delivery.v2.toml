@@ -51,6 +51,11 @@ selects one format per topology. The respondent surface
 exposes operator-facing hardware introspection; the
 audio.options settings subject drives reactive
 reconfiguration. Substrate handles audio byte flow.
+`delivery.enable_output`, `delivery.disable_output`,
+`delivery.set_output_volume`, `delivery.play_output` and
+`delivery.pause_output` each act on one output
+`delivery.list_outputs` names and leave the others as they
+are.
 """
 
 # Request types the framework dispatches against this
@@ -116,6 +121,92 @@ subject; this verb returns it as a one-shot read.
 """
 payload_in = "tbd-review"
 payload_out = "tbd-review"
+
+# ----- Five verbs on one output -----
+#
+# Each names one output by the `hw:N,M` id
+# `delivery.list_outputs` gives it, and touches that output
+# only. Any other id is refused. Each answers
+# `{ v: 1, output: { output_id: string, enabled: bool,
+# playing: bool, volume: u32 | null } }` for that output and
+# no other. `playing` means the chain terminates at that
+# output. With no binding the chain follows the operator's
+# output device, and that output counts as playing. The
+# binding is not kept across a restart; enabled flags and
+# accepted volumes are.
+
+[[requests]]
+request_type = "delivery.enable_output"
+description = """
+Let one output play. Payload is `{ v: 1, output_id: string }`,
+the `hw:N,M` id `delivery.list_outputs` names; any other id is
+refused. Answers `{ v: 1, output: { output_id, enabled: true,
+playing, volume } }` for that output only. Enabling an output
+does not play it and changes no other output. The flag is
+kept in the plugin's state and survives a restart.
+"""
+
+[[requests]]
+request_type = "delivery.disable_output"
+description = """
+Stop one output from playing. Payload is
+`{ v: 1, output_id: string }`; an id `delivery.list_outputs`
+does not name is refused. Answers `{ v: 1, output: {
+output_id, enabled: false, playing: false, volume } }` for
+that output only. Disabling the output that is playing pauses
+it and leaves a silent terminus; no other output starts.
+Disabling any other output changes nothing else. The flag is
+kept in the plugin's state and survives a restart.
+"""
+
+[[requests]]
+request_type = "delivery.set_output_volume"
+description = """
+Set one output's volume. Payload is
+`{ v: 1, output_id: string, volume: u32 }`, `volume` 0
+through 100; 101 is refused, and so is an id
+`delivery.list_outputs` does not name. The volume is one
+mixer set on that output's own default mixer control. Answers
+`{ v: 1, output: { output_id, enabled, playing, volume } }`
+with the level the card accepted; a level the card refuses
+fails the verb and is not recorded. An output with no mixer
+control is refused. When that control is the chain's hardware
+mixer, the verb refuses and names the global volume: the
+global volume stays the global volume and is set where it
+always was. A software mixer is not that refusal. An accepted
+volume is kept in the plugin's state and survives a restart.
+No other output's level moves.
+"""
+
+[[requests]]
+request_type = "delivery.play_output"
+description = """
+Bind the chain to one output. Payload is
+`{ v: 1, output_id: string }`; an id `delivery.list_outputs`
+does not name is refused. Answers `{ v: 1, output: {
+output_id, enabled, playing: true, volume } }` for that
+output only. The chain has one terminus, so one output plays
+at a time: a play while another output is playing is refused
+and the first keeps playing. A disabled output cannot play
+and is refused. Playing the output that is already playing
+changes nothing. The binding is not kept across a restart;
+after a restart the chain follows the operator's output
+device again.
+"""
+
+[[requests]]
+request_type = "delivery.pause_output"
+description = """
+Take the chain off one output. Payload is
+`{ v: 1, output_id: string }`; an id `delivery.list_outputs`
+does not name is refused. Answers `{ v: 1, output: {
+output_id, enabled, playing: false, volume } }` for that
+output only. Pausing the output that is playing leaves a
+silent terminus: that output goes quiet and no other output
+starts in its place. Pausing an output that is not playing
+changes nothing and pauses no other. The binding is not kept
+across a restart.
+"""
 
 [[subjects]]
 addressing = { scheme = "evo.audio.delivery", value = "outputs" }
