@@ -275,30 +275,41 @@ the cloud tree on demand instead of eager-batch-scanning.
 [[requests]]
 request_type = "library.search_library"
 description = """
-Search across registered sources. Payload is
+One query, one list. Payload is
 `{ v: 1, query: string, source_ids: [string...] | null,
    include_offline: bool, max_results: u32 }`.
-
-`source_ids` null means search every Online source;
-explicit list filters to that subset. `include_offline: false`
-(default) skips Offline sources silently; `true` includes
-them and serves results from the browse-tree cache when
-available + the cached listing is non-empty (stale results
-are flagged per-entry).
-
-`max_results` is capped at 1000 by the framework; values
-above 1000 are clamped silently.
+`source_ids` null means every enabled source; an explicit list
+narrows to that subset. `max_results` is capped at 1000;
+values above 1000 are clamped silently.
 
 Returns `{ v: 1, results: [SearchResult...], truncated: bool,
             stale_sources: [string...] }`. Each SearchResult
-mirrors BrowseEntry with the `kind` discriminant + an additional
-`source_id: string` field.
+mirrors BrowseEntry with the `kind` discriminant plus
+`source_id: string | null`.
 
-Cloud sources execute the search via the cloud's native
-search API (Google Drive `q=name contains 'X'`, OneDrive
-`$search=X`); local sources delegate to MPD's `search`
-command; NAS sources also via MPD's search against the
-mounted path.
+MPD is searched once for every source it serves — the local
+library, USB, NAS. Each hit is stamped once with the source it
+came from: the source whose mount the hit lies under. A hit
+under no registered source is kept, and its `source_id` is
+null.
+
+Order is the local library, then USB and NAS, then DLNA, then
+cloud. Within a rank, source id. Within a source, that
+source's own order.
+
+An enabled, online DLNA source is searched through the browse
+this plugin already uses: a walk of the ContentDirectory from
+the root. A walk that stops at 32 browses names that source in
+`stale_sources` and keeps the hits it already found. An
+enabled cloud source is named in `stale_sources`; it is not
+searched, and it is not filled with invented hits. A source
+that was asked and failed is named there too.
+
+A forgotten track is omitted, whether its URI is a library
+path or a `dlna:` identity. An offline or retired source is
+not in the results. When `include_offline` is true, that
+source is named in `stale_sources` and still has no hits.
+There is no browse-tree cache behind this verb.
 """
 
 [[requests]]
