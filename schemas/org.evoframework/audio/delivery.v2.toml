@@ -55,7 +55,11 @@ reconfiguration. Substrate handles audio byte flow.
 `delivery.set_output_volume`, `delivery.play_output` and
 `delivery.pause_output` each act on one output
 `delivery.list_outputs` names and leave the others as they
-are.
+are. `delivery.add_logical_output`,
+`delivery.update_logical_output`,
+`delivery.remove_logical_output` and
+`delivery.list_logical_outputs` keep the names the operator
+gives to physical outputs, each name pointing at one output.
 """
 
 # Request types the framework dispatches against this
@@ -206,6 +210,67 @@ silent terminus: that output goes quiet and no other output
 starts in its place. Pausing an output that is not playing
 changes nothing and pauses no other. The binding is not kept
 across a restart.
+"""
+
+# ----- Named outputs -----
+#
+# A logical output is a name the operator gives to one physical
+# `hw:N,M` output. It has a stable id the plugin mints
+# (`logical:<n>`, never reused), a name, and the physical output
+# it points at. A name is trimmed, non-empty, at most 64
+# characters, and unique among logical outputs without regard
+# to case; respelling one's own name is allowed. Two names may
+# point at one physical output. A logical id is not a physical
+# output: the five output verbs above refuse it. Names are kept
+# in the plugin's state and survive a restart. No subject is
+# published for them and `delivery.list_outputs` is unchanged.
+
+[[requests]]
+request_type = "delivery.add_logical_output"
+description = """
+Give one physical output a name. Payload is
+`{ v: 1, name: string, output_id: string }`, where `output_id`
+is a `hw:N,M` row `delivery.list_outputs` names; any other id
+is refused. The name is trimmed, non-empty, at most 64
+characters, and unique among logical outputs without regard to
+case; an empty, over-long or taken name is refused. Answers
+`{ v: 1, logical_output: { id, name, output_id } }` with the
+id minted as `logical:<n>`, never reused. Two names may point
+at one physical output. The physical output is untouched.
+"""
+
+[[requests]]
+request_type = "delivery.update_logical_output"
+description = """
+Rename a named output, point it at another physical output, or
+both. Payload is
+`{ v: 1, id: string, name?: string, output_id?: string }`. The
+id stays. A new `name` follows the same rules as on add, and
+respelling one's own name is allowed. A new `output_id` must
+be a row `delivery.list_outputs` names; any other id is
+refused. An update that names neither is refused, and so is an
+unknown logical id. Answers
+`{ v: 1, logical_output: { id, name, output_id } }` as the row
+is now. A refused update changes nothing.
+"""
+
+[[requests]]
+request_type = "delivery.remove_logical_output"
+description = """
+Take a name away. Payload is `{ v: 1, id: string }`; an unknown
+id is refused. Answers `{ v: 1, logical_output: { id, name,
+output_id } }`, the row that was taken away. The physical
+output stays as it was, and the id is never minted again.
+"""
+
+[[requests]]
+request_type = "delivery.list_logical_outputs"
+description = """
+Read the names back. Payload is `{ v: 1 }`. Answers
+`{ v: 1, logical_outputs: [{ id, name, output_id }] }`, every
+named output in id order; an empty set is an empty list. The
+read changes nothing: no row, no state, no physical output,
+and `delivery.list_outputs` is unchanged.
 """
 
 [[subjects]]
