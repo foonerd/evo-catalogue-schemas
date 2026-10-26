@@ -66,7 +66,9 @@ record and publish nothing. `library.forget_track` takes one
 track out of what browse, search and those two reads return,
 leaving the file, the source and the live queue as they are;
 `library.forget_album` does the same for every current track
-of one album, through the same set.
+of one album, through the same set. `library.suggest` offers
+up to eight artist, album and title prefixes while the
+operator is still typing, from the MPD library alone.
 """
 
 # ----- Source-registration verbs -----
@@ -573,6 +575,30 @@ those in `track_count`. `library.list_works` and
 `library.get_work_recordings` still list a forgotten track.
 
 The verb publishes no subject.
+"""
+
+# ----- Suggestions -----
+
+[[requests]]
+request_type = "library.suggest"
+description = """
+Suggestions while the operator is still typing. Payload is
+`{ v: 1, prefix: string }`. An empty prefix — including one
+that is only spaces — answers `{ v: 1, suggestions: [] }` and
+asks nothing. Otherwise the answer is
+`{ v: 1, suggestions: [string] }`, at most eight strings.
+
+Artists, then albums, then track titles, each in the order MPD
+listed them. A string is kept when it begins with the prefix,
+case-insensitively. Duplicates are dropped case-insensitively,
+and the first spelling is the one kept. A forgotten track's
+title is not offered; a title that a kept track also carries
+still is.
+
+This is not `library.search_library`, which is the submitted
+search. It does not walk DLNA. It does not name a cloud
+source, and it does not invent cloud hits. It publishes no
+subject.
 """
 
 # ----- Acceptance rows -----
