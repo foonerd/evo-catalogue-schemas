@@ -1,0 +1,124 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Just a Nerd
+
+# Schema for the `audio.zones` shelf at shape version 1.
+#
+# A zone is a name over one or more logical outputs — the
+# `logical:<n>` ids `delivery.list_logical_outputs` on the
+# `audio.delivery` shelf returns. A zone is not an ALSA device
+# and not an EQ. It moves no audio, no mixer and no drop-in.
+# It has a stable id the plugin mints, a name, and the logical
+# outputs it holds.
+#
+# The shelf is stocked by the delivery plugin alongside
+# `audio.delivery`, because a zone is nothing but logical
+# outputs and the refusal that keeps a zoned logical output
+# from being removed needs both registries in one process.
+# The plugin reads the logical-output store and writes only
+# the zone store.
+#
+# Reference plugin: `org.evoframework.delivery.alsa` in
+# evo-device-audio.
+
+schema_version = 1
+rack = "audio"
+shelf = "zones"
+shape = 1
+
+description = """
+A name over one or more logical outputs. `zone.add` makes a
+zone, `zone.update` renames it or changes its outputs without
+changing its id, `zone.remove` takes it away, and `zone.list`
+reads every zone back in id order. A logical output sits in
+one zone at most. No per-zone EQ and no scene: a zone carries
+a name and a membership and nothing else.
+"""
+
+# ----- Shared rules -----
+#
+# Ids are minted `zone:<n>` and never reused; a removed zone's
+# number is not minted again. A name is trimmed, non-empty, at
+# most 64 characters, and unique among zones without regard to
+# case; respelling one's own name is allowed. A membership is a
+# list of `logical:<n>` ids: at least one; each an id
+# `delivery.list_logical_outputs` returns, so a physical
+# `hw:N,M` id is refused; each named once; and each in no other
+# zone — the zone being updated is not another zone. A refused
+# add or update changes nothing. Zones are kept in the plugin's
+# state and survive a restart. No subject is published.
+
+[[requests]]
+request_type = "zone.add"
+description = """
+Make a zone. Payload is
+`{ v: 1, name: string, logical_output_ids: [string] }`.
+Answers `{ v: 1, zone: { id, name, logical_output_ids } }`,
+that zone only, with the id minted `zone:<n>` and never
+reused. The name is trimmed, non-empty, at most 64 characters,
+and unique among zones without regard to case; an empty,
+over-long or taken name is refused. The membership holds at
+least one id: an empty list is refused. Each id must be a
+logical output `delivery.list_logical_outputs` returns — a
+physical `hw:N,M` id is refused — named once in the list, and
+in no other zone; an unknown id, an id named twice, and an id
+another zone holds are each refused, and the refusal of a held
+id names that zone. The logical outputs and the physical
+outputs are untouched.
+"""
+
+[[requests]]
+request_type = "zone.update"
+description = """
+Rename a zone, change its membership, or both. Payload is
+`{ v: 1, id: string, name?: string, logical_output_ids?:
+[string] }`. The id stays. A new `name` follows the same rules
+as on add, and respelling one's own name is allowed. A new
+`logical_output_ids` follows the same rules as on add, and
+the zone being updated is not another zone: its own outputs
+may be kept or reordered. An update that names neither is
+refused, and so is an unknown zone id. Answers
+`{ v: 1, zone: { id, name, logical_output_ids } }` as the zone
+is now. A refused update changes nothing.
+"""
+
+[[requests]]
+request_type = "zone.remove"
+description = """
+Take a zone away. Payload is `{ v: 1, id: string }`; an unknown
+id is refused. Answers `{ v: 1, zone: { id, name,
+logical_output_ids } }`, the zone that was taken away. The
+logical outputs it held stay as they are and may join another
+zone; the physical outputs stay as they are; the id is never
+minted again.
+"""
+
+[[requests]]
+request_type = "zone.list"
+description = """
+Read the zones back. Payload is `{ v: 1 }`. Answers
+`{ v: 1, zones: [{ id, name, logical_output_ids }] }`, every
+zone in id order; an empty set is `[]`. The read changes
+nothing.
+"""
+
+# Acceptance criteria a plugin claiming to satisfy this shape
+# MUST meet.
+[[acceptance]]
+name = "zones-membership-is-logical-outputs-only"
+detail = "Every id in a zone's membership is a logical output the `audio.delivery` shelf returns from `delivery.list_logical_outputs`. A physical `hw:N,M` id, an unknown id, and an empty membership are refused on `zone.add` and on `zone.update`."
+
+[[acceptance]]
+name = "zones-one-zone-per-logical-output"
+detail = "A logical output sits in one zone at most. `zone.add` and `zone.update` refuse an id another zone holds and name that zone; an id named twice in one list is refused. The zone being updated is not another zone. The membership check and the zone write happen under one read lock on the logical-output store, so a logical output cannot be removed between the two."
+
+[[acceptance]]
+name = "zones-remove-leaves-outputs"
+detail = "`zone.remove` takes the zone away and answers it. It writes nothing but the zone store: the logical outputs it held and the physical outputs stay as they are. The plugin does not cascade a zone edit from any other verb."
+
+[[acceptance]]
+name = "zones-ids-minted-never-reused"
+detail = "Ids are `zone:<n>`, minted in creation order, and never reused after a remove. `zone.update` keeps the id. `zone.list` answers in id order, whatever order the state file holds."
+
+[[acceptance]]
+name = "zones-no-eq-no-scene-no-subject"
+detail = "A zone carries a name and a membership and nothing else. No per-zone EQ is attached, no scene is stored, and no subject is published for zones."

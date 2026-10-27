@@ -261,6 +261,9 @@ Take a name away. Payload is `{ v: 1, id: string }`; an unknown
 id is refused. Answers `{ v: 1, logical_output: { id, name,
 output_id } }`, the row that was taken away. The physical
 output stays as it was, and the id is never minted again.
+While a zone on the `audio.zones` shelf holds the id, the verb
+refuses and names that zone, and the logical output stays;
+take it out of the zone first.
 """
 
 [[requests]]
