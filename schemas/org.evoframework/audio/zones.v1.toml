@@ -5,10 +5,11 @@
 #
 # A zone is a name over one or more logical outputs — the
 # `logical:<n>` ids `delivery.list_logical_outputs` on the
-# `audio.delivery` shelf returns. A zone is not an ALSA device
-# and not an EQ. It moves no audio, no mixer and no drop-in.
-# It has a stable id the plugin mints, a name, and the logical
-# outputs it holds.
+# `audio.delivery` shelf returns. A zone is not an ALSA device.
+# It moves no audio, no mixer and no drop-in. It has a stable
+# id the plugin mints, a name, the logical outputs it holds,
+# and its own EQ, which the plugin stores and answers but does
+# not render.
 #
 # The shelf is stocked by the delivery plugin alongside
 # `audio.delivery`, because a zone is nothing but logical
@@ -30,8 +31,10 @@ A name over one or more logical outputs. `zone.add` makes a
 zone, `zone.update` renames it or changes its outputs without
 changing its id, `zone.remove` takes it away, and `zone.list`
 reads every zone back in id order. A logical output sits in
-one zone at most. No per-zone EQ and no scene: a zone carries
-a name and a membership and nothing else.
+one zone at most. A zone also stores its own EQ, set by
+`zone.set_eq_engaged` and `zone.set_eq_band` and carried in
+every zone answer; nothing on this shelf renders it, and
+`eq_only` stays the one pipe. No scene.
 """
 
 # ----- Shared rules -----
@@ -46,15 +49,28 @@ a name and a membership and nothing else.
 # zone — the zone being updated is not another zone. A refused
 # add or update changes nothing. Zones are kept in the plugin's
 # state and survive a restart. No subject is published.
+#
+# Every zone answer is `{ id, name, logical_output_ids, eq }`.
+# `eq` is `{ engaged, bands }`: `engaged` is a bool and starts
+# false; `bands` is exactly 10, index 0 through 9. Each band is
+# `{ freq_hz, gain_db, q }` with `freq_hz` 20 through 20000,
+# `gain_db` -15.0 through 15.0, and `q` 0.1 through 30.0 — the
+# same ranges as the global EQ on `audio.options`, stated once
+# here for this shelf. Each band starts at 1000 Hz, 0 dB, Q
+# 1.0. A zone's EQ absent from the plugin's state loads as that
+# default; a shorter band list is padded with flat bands; a
+# longer list is cut to 10. Changing the name or the membership
+# leaves the EQ; setting the EQ leaves the name and the
+# membership. The EQ is stored and answered, not rendered.
 
 [[requests]]
 request_type = "zone.add"
 description = """
 Make a zone. Payload is
 `{ v: 1, name: string, logical_output_ids: [string] }`.
-Answers `{ v: 1, zone: { id, name, logical_output_ids } }`,
+Answers `{ v: 1, zone: { id, name, logical_output_ids, eq } }`,
 that zone only, with the id minted `zone:<n>` and never
-reused. The name is trimmed, non-empty, at most 64 characters,
+reused, and the EQ off and flat. The name is trimmed, non-empty, at most 64 characters,
 and unique among zones without regard to case; an empty,
 over-long or taken name is refused. The membership holds at
 least one id: an empty list is refused. Each id must be a
@@ -77,8 +93,9 @@ as on add, and respelling one's own name is allowed. A new
 the zone being updated is not another zone: its own outputs
 may be kept or reordered. An update that names neither is
 refused, and so is an unknown zone id. Answers
-`{ v: 1, zone: { id, name, logical_output_ids } }` as the zone
-is now. A refused update changes nothing.
+`{ v: 1, zone: { id, name, logical_output_ids, eq } }` as the
+zone is now; the EQ is left as it was. A refused update
+changes nothing.
 """
 
 [[requests]]
@@ -86,7 +103,7 @@ request_type = "zone.remove"
 description = """
 Take a zone away. Payload is `{ v: 1, id: string }`; an unknown
 id is refused. Answers `{ v: 1, zone: { id, name,
-logical_output_ids } }`, the zone that was taken away. The
+logical_output_ids, eq } }`, the zone that was taken away. The
 logical outputs it held stay as they are and may join another
 zone; the physical outputs stay as they are; the id is never
 minted again.
@@ -96,9 +113,37 @@ minted again.
 request_type = "zone.list"
 description = """
 Read the zones back. Payload is `{ v: 1 }`. Answers
-`{ v: 1, zones: [{ id, name, logical_output_ids }] }`, every
-zone in id order; an empty set is `[]`. The read changes
+`{ v: 1, zones: [{ id, name, logical_output_ids, eq }] }`,
+every zone in id order; an empty set is `[]`. The read changes
 nothing.
+"""
+
+[[requests]]
+request_type = "zone.set_eq_engaged"
+description = """
+Engage or release a zone's EQ. Payload is
+`{ v: 1, id: string, engaged: bool }`; an unknown zone id is
+refused before any write. Answers
+`{ v: 1, zone: { id, name, logical_output_ids, eq } }` with
+`eq.engaged` as asked; the bands, the name and the membership
+stay. Stored and answered only: the plugin does not render the
+zone EQ, and what the operator hears does not change.
+"""
+
+[[requests]]
+request_type = "zone.set_eq_band"
+description = """
+Set one band of a zone's EQ. Payload is
+`{ v: 1, id: string, index: u32, freq_hz: u32, gain_db: f32,
+q: f32 }`. An unknown zone id is refused before any write. An
+`index` outside 0 through 9 is refused. A `freq_hz`, `gain_db`
+or `q` outside the range stated in the shared rules above is
+refused, and the refusal names the field. On any refusal the
+zone stays as it was. Answers
+`{ v: 1, zone: { id, name, logical_output_ids, eq } }` with
+that band as asked; the other nine bands, `engaged`, the name
+and the membership stay. Stored and answered only: the plugin
+does not render the zone EQ.
 """
 
 # Acceptance criteria a plugin claiming to satisfy this shape
@@ -120,5 +165,5 @@ name = "zones-ids-minted-never-reused"
 detail = "Ids are `zone:<n>`, minted in creation order, and never reused after a remove. `zone.update` keeps the id. `zone.list` answers in id order, whatever order the state file holds."
 
 [[acceptance]]
-name = "zones-no-eq-no-scene-no-subject"
-detail = "A zone carries a name and a membership and nothing else. No per-zone EQ is attached, no scene is stored, and no subject is published for zones."
+name = "zones-eq-stored-not-rendered"
+detail = "A zone carries a name, a membership and its own EQ: `engaged` starting false and exactly 10 bands in the ranges the shared rules state, starting flat. `zone.set_eq_engaged` and `zone.set_eq_band` set it; every zone answer carries it; a missing EQ loads as the default, a short band list is padded flat and a long one is cut to 10. An unknown zone, an index outside 0 through 9 and a field outside its range are refused before any write, naming the field. The plugin stores and answers the zone EQ and does not render it: `eq_only` stays the one pipe, no scene is stored, and no subject is published for zones."
