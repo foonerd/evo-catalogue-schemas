@@ -33,8 +33,10 @@ changing its id, `zone.remove` takes it away, and `zone.list`
 reads every zone back in id order. A logical output sits in
 one zone at most. A zone also stores its own EQ, set by
 `zone.set_eq_engaged` and `zone.set_eq_band` and carried in
-every zone answer; nothing on this shelf renders it, and
-`eq_only` stays the one pipe. No scene.
+every zone answer. The shelf publishes one subject,
+`evo.audio.zones` / `eq_claim`, saying which zone's EQ the one
+`eq_only` cascade hears, if any; `eq_only` stays the one pipe.
+No scene.
 """
 
 # ----- Shared rules -----
@@ -61,7 +63,8 @@ every zone answer; nothing on this shelf renders it, and
 # default; a shorter band list is padded with flat bands; a
 # longer list is cut to 10. Changing the name or the membership
 # leaves the EQ; setting the EQ leaves the name and the
-# membership. The EQ is stored and answered, not rendered.
+# membership. The EQ is stored and answered here; whether it
+# is heard is the `eq_claim` subject below.
 
 [[requests]]
 request_type = "zone.add"
@@ -146,6 +149,32 @@ and the membership stay. Stored and answered only: the plugin
 does not render the zone EQ.
 """
 
+[[subjects]]
+addressing = { scheme = "evo.audio.zones", value = "eq_claim" }
+subject_type = "audio_zone_eq_claim"
+description = """
+Which zone's EQ the one `eq_only` cascade hears. The state is
+one of two shapes. `{ v: 1, claimed: false }` means the options
+EQ sounds. `{ v: 1, claimed: true, zone_id, engaged: true,
+bands }` means the one `eq_only` cascade in composition.alsa
+uses those bands, engaged; `bands` is exactly 10, each
+`{ freq_hz, gain_db, q }` in the ranges the shared rules state.
+Any other shape, and an absent subject, mean the options EQ.
+
+The claim is true only while one physical output is the
+terminus `delivery.play_output` treats as playing, and exactly
+one zone with `engaged` true holds a logical output that points
+at it. A silent terminus, an unengaged zone, and two engaged
+zones on that terminus are `{ claimed: false }`. Announced at
+load; updated whenever the playing terminus, a zone's EQ or
+membership, or a logical output's target changes; an unchanged
+claim is not republished. While the claim is true the options
+EQ stays stored as it is and supplies no coefficients; when it
+drops the options EQ sounds again. A zone's bands are applied
+in no mode but `eq_only`. The composition plugin reads this
+subject and nothing of the zone store.
+"""
+
 # Acceptance criteria a plugin claiming to satisfy this shape
 # MUST meet.
 [[acceptance]]
@@ -165,5 +194,5 @@ name = "zones-ids-minted-never-reused"
 detail = "Ids are `zone:<n>`, minted in creation order, and never reused after a remove. `zone.update` keeps the id. `zone.list` answers in id order, whatever order the state file holds."
 
 [[acceptance]]
-name = "zones-eq-stored-not-rendered"
-detail = "A zone carries a name, a membership and its own EQ: `engaged` starting false and exactly 10 bands in the ranges the shared rules state, starting flat. `zone.set_eq_engaged` and `zone.set_eq_band` set it; every zone answer carries it; a missing EQ loads as the default, a short band list is padded flat and a long one is cut to 10. An unknown zone, an index outside 0 through 9 and a field outside its range are refused before any write, naming the field. The plugin stores and answers the zone EQ and does not render it: `eq_only` stays the one pipe, no scene is stored, and no subject is published for zones."
+name = "zones-eq-stored-and-heard-through-eq-claim"
+detail = "A zone carries a name, a membership and its own EQ: `engaged` starting false and exactly 10 bands in the ranges the shared rules state, starting flat. `zone.set_eq_engaged` and `zone.set_eq_band` set it; every zone answer carries it; a missing EQ loads as the default, a short band list is padded flat and a long one is cut to 10. An unknown zone, an index outside 0 through 9 and a field outside its range are refused before any write, naming the field. The plugin stores and answers the zone EQ and publishes the `eq_claim` subject; the one `eq_only` cascade in composition.alsa hears the claimed zone's bands from that subject while the claim is true, and the options EQ otherwise. There is one cascade. No scene is stored."
