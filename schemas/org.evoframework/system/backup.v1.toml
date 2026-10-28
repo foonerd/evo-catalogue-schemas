@@ -1,0 +1,93 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Just a Nerd
+
+# Schema for the `system.backup` shelf at shape version 1.
+#
+# Export and import of the operator's configuration as one
+# backup. The plugin owns none of what it carries: each part is
+# read from, and put back through, the shelf verbs of the plugin
+# that owns it. The plugin reads no other plugin's state
+# directory and no other plugin's credentials. A backup never
+# holds the music files and never holds a share password.
+#
+# Cardinality is one plugin per device. Reference plugin:
+# `org.evoframework.system.backup` in evo-device-audio.
+
+schema_version = 1
+rack = "system"
+shelf = "backup"
+shape = 1
+
+description = """
+One backup of the operator's configuration. `export_backup`
+reads three domains, config, playlists and settings, from the
+plugins that own them and answers them as one backup.
+`import_backup` puts those three back through the same owners.
+A part an owner refuses is reported, never replaced by a guess.
+Music files and share passwords are never in a backup.
+"""
+
+# ----- Shared rules -----
+#
+# A backup is `{ v: 1, config, playlists, settings }`. Each part
+# is the owner's own answer shape:
+#
+# - `config`: `{ logical_outputs, zones }`. `logical_outputs` is
+#   the list `delivery.list_logical_outputs` answers on
+#   `audio.delivery`; `zones` is the list `zone.list` answers on
+#   `audio.zones`, each zone with its EQ. A zone's membership
+#   names logical outputs by the ids this backup carries.
+# - `playlists`: `[{ name, m3u }]`, every stored playlist from
+#   `playlist.list_playlists` on `audio.playlist`, with `m3u` the
+#   text `playlist.export_file` answers for that name with format
+#   `m3u` and library-relative rows.
+# - `settings`: `{ record, eq_presets }`. `record` is the
+#   settings `options.get_settings` answers on `audio.options`;
+#   `eq_presets` is the library `options.list_eq_presets`
+#   answers.
+#
+# Import adds and sets; it removes nothing the device already
+# has. It runs config first (logical outputs, then zones), then
+# settings, then playlists. A zone's membership is remapped to
+# the logical output ids the device mints as each output is
+# added back. An item its owner refuses, such as a logical
+# output that names hardware this device does not have, a zone
+# or playlist whose name the device already holds, or an
+# `output_device` this device does not have, is reported and
+# skipped; nothing is put in its place, and the other items
+# still go back. `composition_mode` in the settings record is not
+# put back: the composition plugin writes it.
+
+[[requests]]
+request_type = "export_backup"
+description = """
+Read the three domains into one backup. Payload is `{ v: 1 }`.
+Answers `{ v: 1, backup: { v: 1, config: { logical_outputs,
+zones }, playlists: [{ name, m3u }], settings: { record,
+eq_presets } } }`, each part as the shared rules above state.
+The read changes nothing. If an owner cannot answer, the export
+is refused; a backup is never answered with a domain left out.
+"""
+
+[[requests]]
+request_type = "import_backup"
+description = """
+Put a backup back. Payload is `{ v: 1, backup }`, with `backup`
+as `export_backup` answers it. A backup whose own `v` is not 1
+is refused before anything is written. Logical outputs go back
+through `delivery.add_logical_output`; zones through `zone.add`,
+then `zone.set_eq_engaged` and `zone.set_eq_band`; the settings
+record through the matching `options.set_*` verbs, except
+`composition_mode`; the EQ presets through
+`options.save_eq_preset`; and each playlist through
+`playlist.import_file` with format `m3u`, its text, and
+`overwrite` false. Answers `{ v: 1, refused: [{ domain, item,
+reason }] }`: every item an owner refused, with the owner's
+reason; an empty list means every item went back.
+"""
+
+# Acceptance criteria a plugin claiming to satisfy this shape
+# MUST meet.
+[[acceptance]]
+name = "backup-goes-through-the-owners-and-reports-what-they-refuse"
+detail = "`export_backup { v: 1 }` answers `{ v: 1, backup: { v: 1, config, playlists, settings } }`: `config` as `{ logical_outputs, zones }` from `delivery.list_logical_outputs` and `zone.list`; `playlists` as `[{ name, m3u }]` from `playlist.list_playlists` and `playlist.export_file` with format `m3u` and library-relative rows; `settings` as `{ record, eq_presets }` from `options.get_settings` and `options.list_eq_presets`. An owner that cannot answer refuses the export. `import_backup { v: 1, backup }` refuses a backup whose own `v` is not 1 before any write, then puts config, settings and playlists back, in that order, through `delivery.add_logical_output`, `zone.add`, `zone.set_eq_engaged`, `zone.set_eq_band`, the `options.set_*` verbs except `composition_mode`, `options.save_eq_preset` and `playlist.import_file` with `overwrite` false, remapping zone membership to the logical output ids the device mints. Import removes nothing the device has. Each item an owner refuses, a missing device among them, is answered in `refused` with its domain, the item and the owner's reason, and nothing is put in its place. The plugin reads no other plugin's state directory or credentials. No backup contains the music files or a share password."
