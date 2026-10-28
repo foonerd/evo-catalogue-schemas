@@ -56,9 +56,11 @@ description = """
 Set the alarm. Payload is `{ v: 1, weekdays: [string], time:
 string, playlist_name: string }`, each field as the shared
 rules above state. Answers `{ v: 1, alarm: { weekdays, time,
-playlist_name } }` with the name trimmed. A set when an alarm
-exists replaces it: the appointment in place is cancelled and
-the new one is scheduled. A refused set changes nothing.
+playlist_name } }` with the name trimmed. A set schedules the
+appointment `alarm` and does not cancel it first: a set that
+succeeds is the one alarm, and a create the ledger refuses
+leaves the previous appointment pending. A refused set changes
+nothing.
 """
 
 [[requests]]
@@ -73,4 +75,4 @@ alarm remains. Clearing when no alarm is set still answers ok.
 # MUST meet.
 [[acceptance]]
 name = "alarm-one-appointment-that-wakes-and-plays"
-detail = "There is at most one alarm. `alarm.set { v: 1, weekdays, time, playlist_name }` refuses an empty `weekdays`, a day named twice, a token outside `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`, a `time` that is not `HH:MM` with the hour 00 through 23 and the minute 00 through 59, and a `playlist_name` that is empty once trimmed; a refused set schedules nothing and the alarm in place stays. The set does not check that the playlist exists. It answers `{ v: 1, alarm: { weekdays, time, playlist_name } }`, and a new set replaces the alarm: the appointment in place is cancelled and the new one scheduled. `alarm.clear { v: 1 }` cancels the appointment, leaves no alarm, and answers `{ v: 1, status: \"ok\" }`, also when no alarm is set. The alarm is one appointment on the framework appointment ledger with `must_wake_device` true, zone `Local`, the ledger's default miss policy and no `wake_pre_arm_ms`; its action is `queue.load_playlist_to_queue` on `audio.queue` with `{ v: 1, playlist_name, start_position: 0 }`. The plugin programs no RTC and does not move `RtcWakeCallback`. It is not the sleep timer: it does not call `options.set_sleep_timer`."
+detail = "There is at most one alarm. `alarm.set { v: 1, weekdays, time, playlist_name }` refuses an empty `weekdays`, a day named twice, a token outside `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`, a `time` that is not `HH:MM` with the hour 00 through 23 and the minute 00 through 59, and a `playlist_name` that is empty once trimmed; a refused set schedules nothing and the alarm in place stays. The set does not check that the playlist exists. It answers `{ v: 1, alarm: { weekdays, time, playlist_name } }`, and a set schedules the appointment `alarm` without cancelling it first: a successful set is the one alarm, and a create the ledger refuses leaves the previous appointment pending. `alarm.clear { v: 1 }` cancels the appointment, leaves no alarm, and answers `{ v: 1, status: \"ok\" }`, also when no alarm is set. The alarm is one appointment on the framework appointment ledger with `must_wake_device` true, zone `Local`, the ledger's default miss policy and no `wake_pre_arm_ms`; its action is `queue.load_playlist_to_queue` on `audio.queue` with `{ v: 1, playlist_name, start_position: 0 }`. The plugin programs no RTC and does not move `RtcWakeCallback`. It is not the sleep timer: it does not call `options.set_sleep_timer`."
