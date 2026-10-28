@@ -71,6 +71,21 @@ Take the alarm away. Payload is `{ v: 1 }`. Answers
 alarm remains. Clearing when no alarm is set still answers ok.
 """
 
+[[requests]]
+request_type = "alarm.reschedule"
+description = """
+Schedule the stored alarm again, on the zone now in force.
+Payload is `{ v: 1 }`. The stored alarm is the one the last
+successful `alarm.set` gave, until `alarm.clear` takes it away.
+When one is stored, the verb calls create for the id `alarm`
+with it, without cancelling first, so the ledger computes the
+next fire from the zone then in force, and answers
+`{ v: 1, alarm: { weekdays, time, playlist_name } }`. With
+nothing stored it creates nothing and answers
+`{ v: 1, status: "ok" }`. A create the ledger refuses is a
+refused verb, and the stored alarm stays.
+"""
+
 # Acceptance criteria a plugin claiming to satisfy this shape
 # MUST meet.
 [[acceptance]]
