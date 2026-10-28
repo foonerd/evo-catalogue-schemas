@@ -475,6 +475,33 @@ off.
 payload_in = "tbd-review"
 payload_out = "tbd-review"
 
+[[requests]]
+request_type = "options.set_sleep_timer"
+description = """
+Arm, replace or cancel the one sleep timer. Payload shape:
+`{ v: 1, seconds: u32, fade_ms: u32 }`; answers
+`{ v: 1, status: "ok" }`. There is no cap on either field.
+`seconds` 0 cancels. After `seconds`, the global volume falls
+to silence over `fade_ms`, playback pauses, and the volume
+returns to the level it had when the fade began, so the next
+play is not silent. The level is the `volume` that
+`get_now_playing` on `audio.playback` answers; the fade and the
+restore go through `set_volume`, and the pause is `pause`. A
+cancel during the fade restores that level and does not pause.
+A second set replaces the armed timer. A volume change during
+the fade is overridden by the next step, and the restore is
+still the pre-fade level. If the volume cannot be read, the
+timer pauses and leaves the volume alone.
+
+The timer is not a setting. Nothing is written to the options
+file, no happening is emitted, and the settings subject does
+not move. Unload cancels the timer and restores the volume if
+a fade is under way; a fresh load has no timer. A crash, or a
+shutdown that does not run that unload, during the fade can
+leave the volume part-way down. This is not crossfade, and it
+does not program the RTC.
+"""
+
 # Acceptance criteria a plugin claiming to satisfy this
 # shape MUST meet.
 [[acceptance]]
@@ -576,6 +603,10 @@ detail = "The named EQ preset library is bounded: at most 32 entries (`save_eq_p
 [[acceptance]]
 name = "eq-preset-recall-emits-single-subject-update"
 detail = "`recall_eq_preset` replaces all 10 active eq_bands atomically and emits a SINGLE `audio.options.changed` happening with field `eq_bands` — not 10. This is the recall verb's architectural reason for existing alongside the per-band setter: subject-stream consumers observe one recall gesture, not ten band updates. The composition.alsa subscriber (or any future subject consumer) recomputes biquad coefficients once per recall, not once per band."
+
+[[acceptance]]
+name = "sleep-timer-fades-pauses-and-restores"
+detail = "`options.set_sleep_timer { v: 1, seconds: u32, fade_ms: u32 }` answers `{ v: 1, status: \"ok\" }`, with no cap on either field. There is one timer: a second set replaces the armed one, and `seconds` 0 cancels. After `seconds` the global volume falls to silence over `fade_ms`, playback pauses, and the volume returns to the level it had when the fade began. A cancel during the fade restores that level and does not pause. A volume change during the fade is overridden by the next step; the restore is still the pre-fade level. If the volume cannot be read, the timer pauses and leaves the volume alone. The timer is not a setting: it writes nothing to the options file, emits no happening, and does not move the settings subject, so `options-persists-on-write` does not apply to it. Unload cancels the timer and restores the volume if a fade is under way; a fresh load has no timer. A crash, or a shutdown that does not run that unload, during the fade can leave the volume part-way down. The timer is not crossfade and leaves `crossfade_seconds` as it is; it does not program the RTC."
 
 # NOTE: payload_in / payload_out for the eight request
 # types are marked `tbd-review` pending plugin-author
