@@ -20,6 +20,7 @@ description = """
 The operator's language. `language.set` sets it from settings at
 any time after first boot and answers the language in force. A
 tag the glass has no catalogue for is refused and not applied.
+Before any set, the language in force is `en`.
 """
 
 [[requests]]
@@ -30,11 +31,12 @@ string }`, a BCP 47 tag. Answers `{ v: 1, language }`, the
 language now in force. The glass ships one catalogue, `en`. A tag
 the glass has no catalogue for is refused and not applied: the
 language in force stays, and the answer is `{ v: 1, language }`
-with that language.
+with that language. Before any set, the language in force is
+`en`.
 """
 
 # Acceptance criteria a plugin claiming to satisfy this shape
 # MUST meet.
 [[acceptance]]
 name = "language-set-applies-only-a-language-the-glass-can-show"
-detail = "`language.set { v: 1, language }` answers `{ v: 1, language }`, the language now in force, as a BCP 47 tag. It is reachable from settings at any time after first boot. The glass ships one catalogue, `en`; a tag the glass has no catalogue for is refused and not applied, the language in force stays, and the answer names that language. The answer is never a language that was asked for and not applied."
+detail = "`language.set { v: 1, language }` answers `{ v: 1, language }`, the language now in force, as a BCP 47 tag. It is reachable from settings at any time after first boot. The glass ships one catalogue, `en`; a tag the glass has no catalogue for is refused and not applied, the language in force stays, and the answer names that language. Before any set, the language in force is `en`. The answer is never a language that was asked for and not applied."
