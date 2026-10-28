@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Just a Nerd
+
+# Schema for the `system.info` shelf at shape version 1.
+#
+# Two read verbs that tell the operator what the device is and
+# what it runs: `get_system_info` reads the host, and
+# `get_system_version` reads the installed release. The
+# framework carries neither fact; the distribution does. A fact
+# the host or the box does not provide answers null, never a
+# guess.
+#
+# Cardinality is one plugin per device. Reference plugin:
+# `org.evoframework.system.info` in evo-device-audio. Vendor
+# distributions that report their own release ship a vendor-
+# namespace replacement; the verb names and answer shapes are
+# stable across replacements.
+
+schema_version = 1
+rack = "system"
+shelf = "info"
+shape = 1
+
+description = """
+What the device is and what it runs. `get_system_info` answers
+the host's name, operating system, kernel, architecture, model,
+processor, memory and uptime. `get_system_version` answers the
+installed release, the build, and the bundle's architecture and
+build time. Both are reads. A fact the device does not provide
+answers null.
+"""
+
+# ----- Shared rules -----
+#
+# Every field is read when the verb is answered and nothing is
+# written. A source that is missing or unreadable answers null
+# for its field; the verb still answers. The device's display
+# name is not a field on this shelf.
+
+[[requests]]
+request_type = "get_system_info"
+description = """
+Read the host. Payload is `{ v: 1 }`. Answers
+`{ v: 1, hostname, os, kernel, architecture, model, cpu: { model,
+cores }, memory_total_bytes, uptime_s }`:
+`hostname` from `/proc/sys/kernel/hostname`; `os` from
+`PRETTY_NAME` in `/etc/os-release`; `kernel` from
+`/proc/sys/kernel/osrelease`; `architecture` as the machine name
+uname reports; `model` from `/proc/device-tree/model`, then the
+DMI vendor and product under `/sys/class/dmi/id/` when there is
+no device tree; `cpu` from `/proc/cpuinfo`; `memory_total_bytes`
+from `MemTotal` in `/proc/meminfo`; `uptime_s` from
+`/proc/uptime`. Each field whose source is missing or unreadable
+is null.
+"""
+
+[[requests]]
+request_type = "get_system_version"
+description = """
+Read the installed release. Payload is `{ v: 1 }`. Answers
+`{ v: 1, release, build, architecture, built_at_utc }`.
+`release` is the release the box was installed from, or null. It
+is never the three-part Cargo package version and never the
+version a UI runtime's health endpoint reports. `build` is the
+workspace version this plugin was compiled from.
+`architecture` and `built_at_utc` are the bundle's, from the
+record the installer keeps on the box, or null when the box has
+no such record.
+"""
+
+# Acceptance criteria a plugin claiming to satisfy this shape
+# MUST meet.
+[[acceptance]]
+name = "system-info-reads-the-host-and-answers-null-for-what-is-missing"
+detail = "`get_system_info { v: 1 }` answers `{ v: 1, hostname, os, kernel, architecture, model, cpu: { model, cores }, memory_total_bytes, uptime_s }` from the host sources the request names, with `model` from `/proc/device-tree/model` first and the DMI vendor and product under `/sys/class/dmi/id/` only when there is no device tree. `get_system_version { v: 1 }` answers `{ v: 1, release, build, architecture, built_at_utc }`: `release` is the installed release or null and is never the three-part Cargo package version or a UI runtime's health version; `build` is the workspace version the plugin was compiled from; `architecture` and `built_at_utc` come from the installer's record on the box or are null. A missing or unreadable source answers null for its field and the verb still answers. Neither verb writes anything. There is no display-name field."
