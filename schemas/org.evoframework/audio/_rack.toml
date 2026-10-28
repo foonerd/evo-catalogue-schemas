@@ -73,3 +73,7 @@ current_shape = 1
 [[shelves]]
 name = "zones"
 current_shape = 1
+
+[[shelves]]
+name = "alarm"
+current_shape = 1
