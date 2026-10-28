@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Just a Nerd
+
+# Schema for the `system.locale` shelf at shape version 1.
+#
+# The operator's language, set from settings at any time after
+# first boot, not only from the first-boot wizard. The language is
+# a BCP 47 tag, and a tag is accepted only when the glass has a
+# catalogue for it; the glass ships one catalogue, `en`.
+#
+# Cardinality is one plugin per device. Reference plugin:
+# `org.evoframework.identity.locale` in evo-device-audio.
+
+schema_version = 1
+rack = "system"
+shelf = "locale"
+shape = 1
+
+description = """
+The operator's language. `language.set` sets it from settings at
+any time after first boot and answers the language in force. A
+tag the glass has no catalogue for is refused and not applied.
+"""
+
+[[requests]]
+request_type = "language.set"
+description = """
+Set the operator's language. Payload is `{ v: 1, language:
+string }`, a BCP 47 tag. Answers `{ v: 1, language }`, the
+language now in force. The glass ships one catalogue, `en`. A tag
+the glass has no catalogue for is refused and not applied: the
+language in force stays, and the answer is `{ v: 1, language }`
+with that language.
+"""
+
+# Acceptance criteria a plugin claiming to satisfy this shape
+# MUST meet.
+[[acceptance]]
+name = "language-set-applies-only-a-language-the-glass-can-show"
+detail = "`language.set { v: 1, language }` answers `{ v: 1, language }`, the language now in force, as a BCP 47 tag. It is reachable from settings at any time after first boot. The glass ships one catalogue, `en`; a tag the glass has no catalogue for is refused and not applied, the language in force stays, and the answer names that language. The answer is never a language that was asked for and not applied."

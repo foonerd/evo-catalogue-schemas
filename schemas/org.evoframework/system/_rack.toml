@@ -42,3 +42,7 @@ current_shape = 1
 [[shelves]]
 name = "backup"
 current_shape = 1
+
+[[shelves]]
+name = "locale"
+current_shape = 1
