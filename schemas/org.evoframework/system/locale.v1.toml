@@ -8,6 +8,11 @@
 # a BCP 47 tag, and a tag is accepted only when the glass has a
 # catalogue for it; the glass ships one catalogue, `en`.
 #
+# The device's timezone, an IANA zone name the host's zone
+# database holds. A pending local-time alarm follows a new zone:
+# the set calls `alarm.reschedule` on `audio.alarm` before it
+# answers.
+#
 # Cardinality is one plugin per device. Reference plugin:
 # `org.evoframework.identity.locale` in evo-device-audio.
 
@@ -17,10 +22,13 @@ shelf = "locale"
 shape = 1
 
 description = """
-The operator's language. `language.set` sets it from settings at
-any time after first boot and answers the language in force. A
-tag the glass has no catalogue for is refused and not applied.
-Before any set, the language in force is `en`.
+The operator's language and the device's timezone.
+`language.set` sets the language from settings at any time after
+first boot and answers the language in force. A tag the glass has
+no catalogue for is refused and not applied. Before any set, the
+language in force is `en`. `timezone.set` sets the device's zone
+and answers the zone in force, after a pending local-time alarm
+has been scheduled again on the new zone.
 """
 
 [[requests]]
@@ -35,8 +43,37 @@ with that language. Before any set, the language in force is
 `en`.
 """
 
+[[requests]]
+request_type = "timezone.set"
+description = """
+Set the device's timezone. Payload is `{ v: 1, timezone:
+string }`, an IANA zone name. Answers `{ v: 1, timezone }`, the
+zone now in force as an IANA name.
+
+A zone the host's zone database does not hold, and `Factory`,
+are not applied: the zone in force stays, and the answer is
+`{ v: 1, timezone }` with that zone.
+
+After a successful apply the set waits more than one second, so
+local time in the steward has moved to the new zone, then calls
+`alarm.reschedule` on `audio.alarm` through the shelf dispatcher,
+and only then answers.
+
+A failed apply is not a clean answer: it is an error that names
+the zone in force. A refused reschedule is not a clean answer
+either: it is an error that names the zone in force, which stays
+applied. Sending the same zone again runs the reschedule again.
+
+Requires the `system_admin` capability scope as a write, not
+step-up.
+"""
+
 # Acceptance criteria a plugin claiming to satisfy this shape
 # MUST meet.
 [[acceptance]]
 name = "language-set-applies-only-a-language-the-glass-can-show"
 detail = "`language.set { v: 1, language }` answers `{ v: 1, language }`, the language now in force, as a BCP 47 tag. It is reachable from settings at any time after first boot. The glass ships one catalogue, `en`; a tag the glass has no catalogue for is refused and not applied, the language in force stays, and the answer names that language. Before any set, the language in force is `en`. The answer is never a language that was asked for and not applied."
+
+[[acceptance]]
+name = "timezone-set-answers-the-zone-in-force-after-the-alarm-follows"
+detail = "`timezone.set { v: 1, timezone }` answers `{ v: 1, timezone }`, the zone now in force as an IANA name. A zone the host's zone database does not hold, and `Factory`, are not applied; the zone in force stays and the answer names it. After a successful apply the set waits more than one second, then calls `alarm.reschedule` on `audio.alarm` through the shelf dispatcher, and answers only after that. A failed apply and a refused reschedule are not clean answers; each is an error that names the zone in force, and after a refused reschedule the new zone stays applied. The verb declares `write:system_admin` in the plugin's manifest at `[capabilities.respondent.verb_capabilities]`, not step-up. The answer is never a zone that was asked for and not applied."
