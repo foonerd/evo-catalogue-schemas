@@ -11,7 +11,8 @@
 # The device's timezone, an IANA zone name the host's zone
 # database holds. A pending local-time alarm follows a new zone:
 # the set calls `alarm.reschedule` on `audio.alarm` before it
-# answers.
+# answers. Two reads let settings show the zone in force and the
+# zones a set would apply.
 #
 # Cardinality is one plugin per device. Reference plugin:
 # `org.evoframework.identity.locale` in evo-device-audio.
@@ -28,7 +29,9 @@ first boot and answers the language in force. A tag the glass has
 no catalogue for is refused and not applied. Before any set, the
 language in force is `en`. `timezone.set` sets the device's zone
 and answers the zone in force, after a pending local-time alarm
-has been scheduled again on the new zone.
+has been scheduled again on the new zone. `timezone.get` answers
+the zone in force, and `timezone.list` the zones a `timezone.set`
+would apply.
 """
 
 [[requests]]
@@ -68,6 +71,28 @@ Requires the `system_admin` capability scope as a write, not
 step-up.
 """
 
+[[requests]]
+request_type = "timezone.get"
+description = """
+Read the device's timezone. Payload is `{ v: 1 }`. Answers
+`{ v: 1, timezone }`, the zone in force as an IANA name, as
+`timedatectl show --property=Timezone` names it. A read that
+fails is not a clean answer: it is an error, never a zone that is
+not in force. It writes nothing and needs no write grant.
+"""
+
+[[requests]]
+request_type = "timezone.list"
+description = """
+List the zones a `timezone.set` would apply. Payload is
+`{ v: 1 }`. Answers `{ v: 1, timezones: [string] }`, IANA names:
+each is in the host's zone list and has a TZif file in the host's
+zone database, and `Factory` is not among them. A list that
+cannot be read is not a clean answer: it is an error, never an
+empty or partial list. It writes nothing and needs no write
+grant.
+"""
+
 # Acceptance criteria a plugin claiming to satisfy this shape
 # MUST meet.
 [[acceptance]]
@@ -77,3 +102,11 @@ detail = "`language.set { v: 1, language }` answers `{ v: 1, language }`, the la
 [[acceptance]]
 name = "timezone-set-answers-the-zone-in-force-after-the-alarm-follows"
 detail = "`timezone.set { v: 1, timezone }` answers `{ v: 1, timezone }`, the zone now in force as an IANA name. A zone the host's zone database does not hold, and `Factory`, are not applied; the zone in force stays and the answer names it. After a successful apply the set waits more than one second, then calls `alarm.reschedule` on `audio.alarm` through the shelf dispatcher, and answers only after that. A failed apply and a refused reschedule are not clean answers; each is an error that names the zone in force, and after a refused reschedule the new zone stays applied. The verb declares `write:system_admin` in the plugin's manifest at `[capabilities.respondent.verb_capabilities]`, not step-up. The answer is never a zone that was asked for and not applied."
+
+[[acceptance]]
+name = "timezone-get-answers-the-zone-in-force"
+detail = "`timezone.get { v: 1 }` answers `{ v: 1, timezone }`, the zone `timedatectl show --property=Timezone` names, as an IANA name. A failed read is not a clean answer; it is an error and never names a zone that is not in force. The verb writes nothing and declares no `write` or `step_up` capability."
+
+[[acceptance]]
+name = "timezone-list-answers-the-zones-a-set-would-apply"
+detail = "`timezone.list { v: 1 }` answers `{ v: 1, timezones }`, the IANA names a `timezone.set` would apply: each is in the host's zone list and has a TZif file in the host's zone database, and `Factory` is not among them. A list that cannot be read is not a clean answer; it is an error, never an empty or partial list. The verb writes nothing and declares no `write` or `step_up` capability."
