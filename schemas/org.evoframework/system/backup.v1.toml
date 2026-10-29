@@ -24,7 +24,8 @@ reads three domains, config, playlists and settings, from the
 plugins that own them and answers them as one backup.
 `import_backup` puts those three back through the same owners.
 A part an owner refuses is reported, never replaced by a guess.
-Music files and share passwords are never in a backup.
+Music files and share passwords are never in a backup. A backup
+is at most 16 MiB as compact JSON.
 """
 
 # ----- Shared rules -----
@@ -57,6 +58,14 @@ Music files and share passwords are never in a backup.
 # skipped; nothing is put in its place, and the other items
 # still go back. `composition_mode` in the settings record is not
 # put back: the composition plugin writes it.
+#
+# A backup is at most 16 MiB, 16 x 1 048 576 bytes. The size is
+# the backup object `{ v, config, playlists, settings }` written
+# as compact UTF-8 JSON: not the request or response around it,
+# and not the text the glass shows. Export refuses a backup over
+# the bound and answers none; it never truncates one. Import
+# refuses a backup over the bound before its version is checked
+# and before anything is written.
 
 [[requests]]
 request_type = "export_backup"
@@ -67,14 +76,19 @@ zones }, playlists: [{ name, m3u }], settings: { record,
 eq_presets } } }`, each part as the shared rules above state.
 The read changes nothing. If an owner cannot answer, the export
 is refused; a backup is never answered with a domain left out.
+If the backup, written as compact UTF-8 JSON, is over 16 MiB, the
+export is refused as Permanent and no backup is answered; a
+backup is never truncated.
 """
 
 [[requests]]
 request_type = "import_backup"
 description = """
 Put a backup back. Payload is `{ v: 1, backup }`, with `backup`
-as `export_backup` answers it. A backup whose own `v` is not 1
-is refused before anything is written. Logical outputs go back
+as `export_backup` answers it. A backup that, written as compact
+UTF-8 JSON, is over 16 MiB is refused as Permanent before its
+version is checked and before anything is written. A backup whose
+own `v` is not 1 is refused before anything is written. Logical outputs go back
 through `delivery.add_logical_output`; zones through `zone.add`,
 then `zone.set_eq_engaged` and `zone.set_eq_band`; the settings
 record through the matching `options.set_*` verbs, except
@@ -91,3 +105,7 @@ reason; an empty list means every item went back.
 [[acceptance]]
 name = "backup-goes-through-the-owners-and-reports-what-they-refuse"
 detail = "`export_backup { v: 1 }` answers `{ v: 1, backup: { v: 1, config, playlists, settings } }`: `config` as `{ logical_outputs, zones }` from `delivery.list_logical_outputs` and `zone.list`; `playlists` as `[{ name, m3u }]` from `playlist.list_playlists` and `playlist.export_file` with format `m3u` and library-relative rows; `settings` as `{ record, eq_presets }` from `options.get_settings` and `options.list_eq_presets`. An owner that cannot answer refuses the export. `import_backup { v: 1, backup }` refuses a backup whose own `v` is not 1 before any write, then puts config, settings and playlists back, in that order, through `delivery.add_logical_output`, `zone.add`, `zone.set_eq_engaged`, `zone.set_eq_band`, the `options.set_*` verbs except `composition_mode`, `options.save_eq_preset` and `playlist.import_file` with `overwrite` false, remapping zone membership to the logical output ids the device mints. Import removes nothing the device has. Each item an owner refuses, a missing device among them, is answered in `refused` with its domain, the item and the owner's reason, and nothing is put in its place. The plugin reads no other plugin's state directory or credentials. No backup contains the music files or a share password."
+
+[[acceptance]]
+name = "a-backup-is-at-most-16-mib"
+detail = "The bound is 16 MiB, 16 x 1 048 576 bytes, measured on the backup object `{ v, config, playlists, settings }` written as compact UTF-8 JSON: not the request or response around it, and not the text the glass shows. `export_backup` reads the three domains and, if the backup is over the bound, refuses as Permanent and answers no backup; it never truncates one. `import_backup` refuses a backup over the bound as Permanent before its version is checked and before anything is written. A wrong `v` and a backup that does not parse stay Permanent refusals, and an owner that cannot answer still refuses the whole export as Transient."
