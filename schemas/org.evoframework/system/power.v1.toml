@@ -4,10 +4,11 @@
 # Schema for the `system.power` shelf at shape version 1.
 #
 # Power-management plugins handle operator-gestured host reboot
-# and power-off. Both verbs are step-up gated at the framework
-# dispatcher's per-verb capability gate (scope `system_admin`);
-# the principal must hold the write scope AND an active step-up
-# auth session before the verb reaches the plugin. The plugin
+# and power-off. Both verbs gate at the framework dispatcher's
+# per-verb capability gate at `write:system_admin`; the principal
+# must hold the scope, and, while the household policy protects
+# it, the owner's step-up session on the call, before the verb
+# reaches the plugin. The plugin
 # never re-checks the principal — the framework dispatcher is
 # the authoritative gate, and re-checking inside the plugin
 # would split the policy across two layers.
@@ -28,7 +29,7 @@ shape = 1
 
 description = """
 Host power-management shelf. Plugin implements operator-gestured
-reboot and power-off, each step_up:system_admin gated. The plugin
+reboot and power-off, each write:system_admin gated. The plugin
 exits to the framework as soon as the underlying shutdown verb
 returns; the host's init system performs the actual transition
 asynchronously, so by the time the operator's wire response
@@ -72,7 +73,7 @@ payload_out = "tbd-review"
 
 [[acceptance]]
 name = "verb-gates-declared-in-manifest"
-detail = "Both verbs declare step_up:system_admin in the plugin's manifest at [capabilities.respondent.verb_capabilities]; a manifest without the declarations admits but its verbs default to anonymous-OK, which violates the contract this shelf documents."
+detail = "Both verbs declare write:system_admin in the plugin's manifest at [capabilities.respondent.verb_capabilities]; a manifest without the declarations admits but its verbs default to anonymous-OK, which violates the contract this shelf documents."
 
 [[acceptance]]
 name = "no-re-check-in-handle-request"

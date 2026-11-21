@@ -7,6 +7,27 @@ versioning follows [Semver](https://semver.org).
 
 ## [Unreleased]
 
+### Changed — operator-gesture verbs gate at write rank (v0.2.0 candidate)
+
+- `schemas/org.evoframework/system/power.v1.toml` — `reboot_device`
+  and `power_off_device` declare `write:system_admin`, where the
+  contract named `step_up:system_admin`. A verb declared step-up needs
+  a step-up session on every call; these gestures are guarded by the
+  household policy instead, which asks for the owner's step-up
+  session while it protects `system_admin`. The
+  `verb-gates-declared-in-manifest` acceptance row says so.
+- `schemas/org.evoframework/system/notifications.v1.toml` — the mode
+  and quiet-hours verbs gate at `write:system_admin`.
+- `schemas/org.evoframework/networking/shares.v1.toml` — the share
+  and SMB-server gestures gate at `write:network_admin`. The contract
+  named `plugins_admin` with step-up, which no shipped plugin
+  declared.
+- `schemas/org.evoframework/storage/usb.v1.toml` — every mutating
+  verb gates at `write:network_admin`, the same household door as the
+  share verbs.
+
+The verb names, payloads and replies are unchanged.
+
 ### Changed — artwork server ownership and the `artwork_url` scheme (v0.2.0 candidate)
 
 - `schemas/org.evoframework/audio/playback.v1.toml` — the

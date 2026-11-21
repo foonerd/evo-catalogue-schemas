@@ -46,8 +46,7 @@ DND-toggle / quiet-hours-editor / chime-mode-selector widgets.
 # Verbs stocked on the shelf. All five are handled by the
 # admitted plugin — the framework routes to it via the plugin
 # router. Read/emit/cancel are anonymous; mode + quiet-hours
-# are step-up-gated against system_admin at the framework
-# dispatcher.
+# gate at write:system_admin at the framework dispatcher.
 
 [[requests]]
 request_type = "system.notifications.list_active"

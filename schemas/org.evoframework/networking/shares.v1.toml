@@ -50,18 +50,19 @@ persists the working version, mounts on boot after L3
 reachability, remounts on network transitions, and surfaces
 per-share state on reactive subjects. Server-side SMB shares
 the evo device as an upload target with domain-identity-linked
-user management. All operator gestures step-up-gated;
-audit-ledger emission per gesture.
+user management. All operator gestures gate at
+write:network_admin; audit-ledger emission per gesture.
 """
 
 # ---------------------------------------------------------------
 # Verbs — operator gestures
 # ---------------------------------------------------------------
 #
-# Every verb `plugins_admin` capability-gated with step-up auth
-# per the framework's existing operator-gesture discipline. The
-# plugin (framework runtime) never re-checks the principal — the
-# framework dispatcher is the authoritative gate.
+# Every mutating verb gates at `write:network_admin`; while the
+# household policy protects `network_admin`, each needs the
+# owner's step-up session on the call. The plugin (framework
+# runtime) never re-checks the principal — the framework
+# dispatcher is the authoritative gate.
 
 # --- Share management (read-side) ---
 
