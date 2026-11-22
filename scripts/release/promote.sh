@@ -116,11 +116,17 @@ if (( NO_PUSH == 0 )); then
 
     log "creating GitHub release"
     if command -v gh >/dev/null 2>&1; then
-        gh release create "${TAG}" \
-            "${BUNDLE_PATH}" \
-            "${SIG_PATH}" \
-            --title "${TAG}" \
-            --notes "Release ${TAG} of evo-catalogue-schemas. Bundle SHA-256: ${BUNDLE_SHA256}."
+        if gh release view "${TAG}" >/dev/null 2>&1; then
+            # cut(V) remint / resume: release already from a prior
+            # attempt. Advance the channel pointer below; do not fail.
+            log "GitHub release ${TAG} already exists; leaving assets, advancing channel"
+        else
+            gh release create "${TAG}" \
+                "${BUNDLE_PATH}" \
+                "${SIG_PATH}" \
+                --title "${TAG}" \
+                --notes "Release ${TAG} of evo-catalogue-schemas. Bundle SHA-256: ${BUNDLE_SHA256}."
+        fi
     else
         log "gh CLI not available; upload manually"
     fi
