@@ -77,3 +77,7 @@ current_shape = 1
 [[shelves]]
 name = "alarm"
 current_shape = 1
+
+[[shelves]]
+name = "receiver"
+current_shape = 1

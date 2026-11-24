@@ -1,0 +1,92 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Just a Nerd
+
+# Schema for the `audio.receiver` shelf at shape version 1.
+#
+# Receivers are the device as a network target: another player or phone
+# finds the device and sends audio to it. One plugin per protocol stocks
+# the shelf, each with its own disjoint verb set, under the multi-occupant
+# admission gate (the same arrangement as `networking.shares`). This shape
+# carries the DLNA renderer's verbs; AirPlay and Bluetooth sinks add their
+# own verbs in later shapes or as further occupants.
+#
+# Reference plugin: `org.evoframework.receiver.dlna` in evo-device-audio.
+# It is the renderer: it advertises over SSDP, serves the device and
+# service descriptions and owns the control and event endpoints. It is
+# orthogonal to `audio.dlna`, the MediaServer client, and shares no state
+# with it.
+
+schema_version = 1
+rack = "audio"
+shelf = "receiver"
+shape = 1
+
+description = """
+Audio receiver surface. The DLNA occupant presents the device as a UPnP
+MediaRenderer that controllers (phones, desktop "cast to device") send
+tracks to; what arrives plays through the local player. The renderer is
+disabled by default and holds no socket while disabled. Enabling and
+disabling are operator gestures that gate at `write:network_admin`,
+because an enabled renderer accepts control from any device on the local
+network. The state is published on the `audio_receiver_dlna` subject.
+"""
+
+# ----- Request types -----
+
+[[requests]]
+request_type = "receiver.dlna.get_state"
+description = """
+Read the renderer's state. Payload is `{ v: 1 }` (an empty payload is
+accepted). Returns `{ v: 1, state: { v: 1, state, reason?, enabled,
+friendly_name, udn, port, last_update_at_ms } }` where `state` is one of
+`disabled`, `starting`, `advertising`, `degraded`; `reason` is present
+only when `degraded` and is a code such as `http_bind_failed` or
+`ssdp_bind_failed`; `enabled` is the operator switch; `udn` is the device
+UUID without its `uuid:` prefix; `port` is the TCP port the description is
+served on, `0` until the first enable. The same envelope is the subject
+payload. No scope required.
+"""
+
+[[requests]]
+request_type = "receiver.dlna.enable"
+description = """
+Turn the renderer on and persist the switch. Payload is `{ v: 1 }`.
+Binds the description server, then the SSDP responder, and announces the
+device. Returns the same shape as `get_state`. A bind failure leaves the
+renderer enabled and `degraded` with a reason code, so a restart retries;
+it is not a verb error. Gates at `write:network_admin`.
+"""
+
+[[requests]]
+request_type = "receiver.dlna.disable"
+description = """
+Turn the renderer off and persist the switch. Payload is `{ v: 1 }`.
+Sends SSDP `byebye`, closes every socket and returns the `disabled`
+state. Idempotent. Gates at `write:network_admin`.
+"""
+
+# ----- Acceptance rows -----
+
+[[acceptance]]
+name = "receiver-default-disabled"
+detail = "A device that has never been told otherwise MUST come up with the DLNA renderer disabled and no socket open. Enabling is an operator gesture."
+
+[[acceptance]]
+name = "receiver-gestures-gate-at-write-network-admin"
+detail = "receiver.dlna.enable and receiver.dlna.disable declare `write:network_admin` in the plugin manifest. get_state needs no scope. The framework dispatcher is the authoritative gate; the plugin never re-checks the principal."
+
+[[acceptance]]
+name = "receiver-advertises-a-media-renderer"
+detail = "While enabled, the device description is served over HTTP and declares deviceType `urn:schemas-upnp-org:device:MediaRenderer:1` with the AVTransport, RenderingControl and ConnectionManager services, and the device answers SSDP searches for them. It declares no ContentDirectory service."
+
+[[acceptance]]
+name = "receiver-holds-no-socket-while-disabled"
+detail = "After disable, and before the first enable, the plugin holds no UDP or TCP listener."
+
+[[acceptance]]
+name = "receiver-answers-lan-peers-only"
+detail = "The renderer accepts HTTP connections and answers SSDP datagrams only from local-network peers (RFC 1918, loopback, link-local, unique-local). Other peers are dropped without a reply."
+
+[[acceptance]]
+name = "receiver-leaves-the-dlna-client-unchanged"
+detail = "Enabling the renderer MUST NOT change the `audio.dlna` client's discovered-server set and MUST NOT stop its passive SSDP listener from binding."

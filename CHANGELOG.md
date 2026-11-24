@@ -7,6 +7,14 @@ versioning follows [Semver](https://semver.org).
 
 ## [Unreleased]
 
+### Added — `audio.receiver` shelf, shape 1
+
+- `schemas/org.evoframework/audio/receiver.v1.toml` — the audio
+  receiver shelf. The DLNA renderer stocks `receiver.dlna.get_state`,
+  `receiver.dlna.enable` and `receiver.dlna.disable`; the two writes
+  gate at `write:network_admin`. The renderer is disabled by default.
+  Listed in the `audio` rack index.
+
 ### Changed — operator-gesture verbs gate at write rank (v0.2.0 candidate)
 
 - `schemas/org.evoframework/system/power.v1.toml` — `reboot_device`
