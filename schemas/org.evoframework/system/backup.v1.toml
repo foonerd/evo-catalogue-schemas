@@ -104,6 +104,22 @@ is at most 16 MiB as compact JSON.
 # The setter itself does not check; this is the backup's own
 # guard until it does.
 #
+# The mixer (`mixer_type`, `mixer_device`, `mixer_control` in the
+# settings record) goes back whole or not at all. Before any of
+# the three is sent the plugin reads `delivery.list_mixers` on
+# `audio.delivery` once, for the card the descriptor in
+# `mixer_device` names (`hw:N`, `hw:CARD=<id>`, `hw:N,M` and the
+# bare card forms; the same card token the `output_device` guard
+# uses), and the mixer goes back only if that card lists the
+# control `mixer_control` names. A software mixer that names no
+# device and no control always goes back, and nothing is read for
+# it. A mixer the device lacks, a hardware mixer that names no
+# device or no control, or a mixer list the device cannot read, is
+# reported as the single item `mixer` with a reason that names
+# the device and control, none of the three setters is called, and
+# the device's own mixer stays. The setters themselves do not
+# check; this is the backup's own guard until they do.
+#
 # The language and the zone go back only when the device does not
 # already hold them: import reads `language.get` and
 # `timezone.get` first, and sends nothing for an equal value, so a
@@ -157,14 +173,19 @@ zones through `zone.add`, then `zone.set_eq_engaged` and
 `zone.set_eq_band`; scenes through `scene.put`; the settings
 record through the matching `options.set_*` verbs, except
 `composition_mode`, with `output_device` only if the device has
-that output; the EQ presets through `options.save_eq_preset`;
+that output and the mixer (`mixer_type`, `mixer_device`,
+`mixer_control`) only if the device has that mixer control;
+the EQ presets through `options.save_eq_preset`;
 the language through `language.set` and the zone through
 `timezone.set`, each only when the device does not already hold
 it; the favourites list (the playlist `__favourites__`) row by row
 through `favourites.add_favourite`; a playlist with no rows
 through `playlist.create_playlist`; every other playlist through
 `playlist.import_file` with format `m3u`, its text, and
-`overwrite` false; and last the alarm through `alarm.set`. Answers `{ v: 1, refused: [{ domain, item,
+`overwrite` false; and last the alarm through `alarm.set`. The
+mixer goes back whole or not at all: if `delivery.list_mixers`
+does not list `mixer_control` on the card `mixer_device` names, none
+of the three is sent. Answers `{ v: 1, refused: [{ domain, item,
 reason }] }`: every item an owner refused, with the owner's
 reason; an empty list means every item went back.
 """
@@ -190,3 +211,7 @@ detail = "A backup whose playlists include `__favourites__` puts each of its row
 [[acceptance]]
 name = "scenes-go-back-by-put-and-are-never-recalled"
 detail = "A backup's scenes are read with `scene.list` and `scene.get`, and go back after the zones through `scene.put` with `overwrite` false, with each scene's logical output ids mapped to the ids the device minted; a scene that names a logical output that did not go back, or whose name the device holds, is answered in `refused` as `scene <name>` and not put. A restore sends no `scene.save`, `scene.recall` or `scene.remove`, and the live zones are those the zones import put back. A backup without `scenes` puts back none."
+
+[[acceptance]]
+name = "a-mixer-the-device-lacks-is-refused-whole-and-its-own-stays"
+detail = "A backup whose settings record names a hardware mixer is put back only if `delivery.list_mixers` for the card `mixer_device` names lists the control `mixer_control`; then `options.set_mixer_device`, `options.set_mixer_control` and `options.set_mixer_type` are called in that order. If the card does not list the control, the card is not on the device, the mixer names no device or no control while its type is hardware, or `delivery.list_mixers` cannot be read, none of the three setters is called, one item `mixer` is answered in `refused` with a reason naming the device and control, and the device keeps its own mixer; the rest of the record goes back. A software mixer that names neither a device nor a control goes back without any read."
