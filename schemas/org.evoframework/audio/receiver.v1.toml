@@ -86,7 +86,8 @@ enabled, friendly_name, port, open, session?, last_update_at_ms } }`
 where `state` is one of `disabled`, `starting`, `advertising`,
 `session`, `degraded`; `reason` is present only when `degraded` and is
 a code such as `avahi_unavailable`, `loopback_unavailable`,
-`port_bind_failed` or `playback_refused`; `enabled` is the operator
+`port_bind_failed`, `playback_refused` or `name_unavailable`;
+`enabled` is the operator
 switch; `port` is the TCP control port, `0` until the first enable;
 `open` is `true` when no password is set, so any device on the local
 network may send audio; `session` is present only while `state` is
