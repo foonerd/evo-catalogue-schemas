@@ -183,7 +183,7 @@ detail = "When a session ends for any reason (sender teardown, connection loss, 
 
 [[acceptance]]
 name = "airplay-leaves-the-queue-as-found"
-detail = "A session adds one item to the end of the queue and removes it at the end. The other queue items, their order, and the current position of the queue before the session are unchanged by it."
+detail = "A session adds one item to the end of the queue and removes it at the end. The other queue items and their order are unchanged. The interrupted song is not resumed: after the session the player may be stopped. Authority 2026-11-27: 'current position unchanged' does not mean re-select or resume the prior song (MPD cannot re-select without playing)."
 
 [[acceptance]]
 name = "airplay-sender-volume-is-the-device-volume"
