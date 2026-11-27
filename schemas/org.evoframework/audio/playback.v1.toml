@@ -279,6 +279,47 @@ waiting for `duration_ms` to elapse.
 """
 payload_out = "empty"
 
+# Capture verbs. Request types the playback plugin serves on this shelf
+# as source verbs, like `play_now`; they are not course_correct verbs.
+
+[[verbs]]
+name = "play_capture"
+payload_in = """
+`{ v: 1, capture: string, title?: string, artist?: string, album?: string }`.
+`capture` names a capture source the plugin owns from a closed table. The
+only entry is `"airplay"`, which the plugin maps to a fixed local
+capture of the device's reserved Loopback substream; the caller never
+supplies a device or a URI, and any other `capture` is a Permanent
+refusal. `title`, `artist` and `album` are at most 256 characters each
+and become the item's tags. Adds one item to the END of the queue,
+tags it, and plays it; the other queue items are not touched. If the
+capture item already exists the verb updates its tags and plays it
+(idempotent). Refused as Transient (`capture_idle`) when nothing is
+writing to the capture, so a verb call cannot start an empty capture.
+"""
+payload_out = "`{ v: 1, ok: true, queue_id: u32 }`."
+
+[[verbs]]
+name = "set_capture_tags"
+payload_in = """
+`{ v: 1, capture: string, title?: string, artist?: string, album?: string }`
+with the same limits. Replaces the capture item's tags (fields not given
+are cleared, as the sender's metadata is a complete statement of the
+current track). Refused as Transient (`capture_absent`) when no capture
+item exists.
+"""
+payload_out = "`{ v: 1, ok: true }`."
+
+[[verbs]]
+name = "end_capture"
+payload_in = """
+`{ v: 1, capture: string }`. Removes the capture item from the queue.
+If it is the item playing, playback stops; the rest of the queue and its
+position are left as they were. Idempotent: ending a capture that is not
+present succeeds.
+"""
+payload_out = "`{ v: 1, ok: true }`."
+
 # Acceptance criteria a plugin claiming to satisfy this
 # shape MUST meet. The framework does not enforce these at
 # admission (no runtime assertion harness yet); they
@@ -323,6 +364,22 @@ detail = "The warden announces the `now_playing` subject (addressing `{ scheme =
 [[acceptance]]
 name = "get-now-playing-read-verb-supports-first-render"
 detail = "The warden honours a `get_now_playing` read request_type that returns the current `now_playing` payload synchronously. The verb is read-only (no playback mutation, no queue change) and is the sanctioned surface for first-render state on freshly-connected UI clients. Because the verb is declared in the plugin's respondent.request_types, dispatching it triggers the framework's request-op warden-custody bootstrap so a read works before any transport verb has been issued — the supervisor spawns, queries MPD's current state, and replies. Repeated reads are idempotent and cheap (one MPD `status` + `currentsong` round-trip). Consumers MUST use the read-then-subscribe shape (`get_now_playing` once on connect, subscribe to the now_playing subject for deltas) rather than polling the read verb."
+
+[[acceptance]]
+name = "capture-resolves-from-a-closed-table"
+detail = "play_capture, set_capture_tags and end_capture accept only capture names the plugin owns, and resolve each to a fixed local capture inside the plugin. A request cannot name a device, a URI or a path; play_now still accepts only the URI forms it accepts today."
+
+[[acceptance]]
+name = "capture-is-non-destructive-to-the-queue"
+detail = "play_capture adds to the end of the queue and end_capture removes only that item. The queue's other items and order are unchanged by a capture, and a capture never clears the queue."
+
+[[acceptance]]
+name = "capture-requires-a-writer"
+detail = "play_capture is refused (Transient, capture_idle) while the capture has no writer, so the verb cannot leave the player holding an empty live source."
+
+[[acceptance]]
+name = "capture-verbs-carry-no-secret-and-no-media-path"
+detail = "The capture verbs' payloads carry display tags only. Nothing in them is a credential, a file path or a network address."
 
 [[acceptance]]
 name = "mpd-cycles-output-on-asound-composition-change"
