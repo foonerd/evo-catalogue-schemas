@@ -6,7 +6,9 @@
 # The operator's language, set from settings at any time after
 # first boot, not only from the first-boot wizard. The language is
 # a BCP 47 tag, and a tag is accepted only when the glass has a
-# catalogue for it; the glass ships one catalogue, `en`.
+# catalogue for it; the glass ships one catalogue, `en`. Two reads
+# let settings show the language in force and the languages a set
+# would apply.
 #
 # The device's timezone, an IANA zone name the host's zone
 # database holds. A pending local-time alarm follows a new zone:
@@ -25,9 +27,11 @@ shape = 1
 description = """
 The operator's language and the device's timezone.
 `language.set` sets the language from settings at any time after
-first boot and answers the language in force. A tag the glass has
-no catalogue for is refused and not applied. Before any set, the
-language in force is `en`. `timezone.set` sets the device's zone
+first boot and answers the language in force. `language.get`
+answers the language in force and `language.list` the languages
+a `language.set` would apply. A tag the glass has no catalogue for
+is refused and not applied. Before any set, the language in force
+is `en`. `timezone.set` sets the device's zone
 and answers the zone in force, after a pending local-time alarm
 has been scheduled again on the new zone. `timezone.get` answers
 the zone in force, and `timezone.list` the zones a `timezone.set`
@@ -44,6 +48,26 @@ the glass has no catalogue for is refused and not applied: the
 language in force stays, and the answer is `{ v: 1, language }`
 with that language. Before any set, the language in force is
 `en`.
+"""
+
+[[requests]]
+request_type = "language.get"
+description = """
+Read the language in force. Payload is `{ v: 1 }`. Answers
+`{ v: 1, language }`, the BCP 47 tag `language.set` would answer
+now: the stored language, in the catalogue's spelling, or `en`
+when none is stored or the stored tag has no catalogue. The read
+writes nothing and reaches no host.
+"""
+
+[[requests]]
+request_type = "language.list"
+description = """
+Read the languages a `language.set` would apply. Payload is
+`{ v: 1 }`. Answers `{ v: 1, languages }`, the tags of the
+catalogues the glass ships, in the catalogue's spelling and
+order, `["en"]` today. The language `language.get` answers is
+always one of them. The read writes nothing and reaches no host.
 """
 
 [[requests]]
@@ -98,6 +122,14 @@ grant.
 [[acceptance]]
 name = "language-set-applies-only-a-language-the-glass-can-show"
 detail = "`language.set { v: 1, language }` answers `{ v: 1, language }`, the language now in force, as a BCP 47 tag. It is reachable from settings at any time after first boot. The glass ships one catalogue, `en`; a tag the glass has no catalogue for is refused and not applied, the language in force stays, and the answer names that language. Before any set, the language in force is `en`. The answer is never a language that was asked for and not applied."
+
+[[acceptance]]
+name = "language-get-answers-the-language-in-force"
+detail = "`language.get { v: 1 }` answers `{ v: 1, language }`, the language now in force as a BCP 47 tag in the catalogue's spelling: the stored language, or `en` when none is stored or the stored tag has no catalogue. After a `language.set` that applied a tag it answers that tag; after one that refused a tag it answers the language still in force; after a restart it answers the stored language. The verb writes nothing, reaches no host, and declares no `write` or `step_up` capability."
+
+[[acceptance]]
+name = "language-list-answers-the-languages-a-set-would-apply"
+detail = "`language.list { v: 1 }` answers `{ v: 1, languages }`, the tags the glass has a catalogue for, in the catalogue's spelling and order, never empty and always including `en`. Every tag in it is one `language.set` applies, and the answer of `language.get` is one of them. The verb writes nothing, reaches no host, and declares no `write` or `step_up` capability."
 
 [[acceptance]]
 name = "timezone-set-answers-the-zone-in-force-after-the-alarm-follows"

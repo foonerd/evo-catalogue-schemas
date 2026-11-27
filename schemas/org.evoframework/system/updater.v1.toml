@@ -1,0 +1,117 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Just a Nerd
+
+# Schema for the `system.updater` shelf at shape version 1.
+#
+# The in-app updater: three verbs that start work (check, apply,
+# channel.set) and three reads (status, history, channel.get). The
+# verbs that start work answer at once; the work is done by the
+# distribution's root helper, and `updater.status` reports how it ends.
+#
+# Cardinality is one plugin per device. Reference plugin:
+# `org.evoframework.system.updater` in evo-device-audio. A vendor
+# distribution with its own update mechanism ships a vendor-namespace
+# replacement; the verb names and answer shapes are stable across
+# replacements.
+
+schema_version = 1
+rack = "system"
+shelf = "updater"
+shape = 1
+
+description = """
+The device's in-app updater. `updater.check` starts a check of the
+recorded channel's signed registry; `updater.apply` starts one offered
+component (a plugin, or `evo-host-files`); `updater.channel.set` records
+`alpha`, `test` or `production`. `updater.status`, `updater.history` and
+`updater.channel.get` read what was recorded. The three that start work
+are writes at `system_admin`; the reads are gated at scope `system`.
+"""
+
+# ----- Shared rules -----
+#
+# A verb that starts work answers `{ v: 1, accepted: true, op }` once the
+# request is made, or `{ v: 1, accepted: false, error: { code, detail } }`
+# when it is refused; it never waits for the work. A refusal code is one of
+# `bad_request`, `bad_component`, `bad_version`, `bad_channel`, `busy` and
+# `helper_unavailable`. Nothing the caller names is a path, a URL or a key.
+# The reads write nothing, and a state that does not exist answers an empty
+# field.
+
+[[requests]]
+request_type = "updater.check"
+description = """
+Start a check of the recorded channel's registry. Payload is `{ v: 1 }`.
+Answers `{ v: 1, accepted, op: "check" }` or a refusal. The result is read
+from `updater.status`: `state` `checked` with `inventory`, or `refused`
+with an `error` (`signature_invalid`, `document_expired`,
+`fingerprint_mismatch`, `fetch_failed`, ...).
+"""
+
+[[requests]]
+request_type = "updater.apply"
+description = """
+Start applying one offered component. Payload is `{ v: 1, component,
+version }`: `component` is an `org.evoframework.*` plugin name or
+`evo-host-files`, `version` a dotted numeric version (for the host files,
+the release). Answers `{ v: 1, accepted, op: "apply" }` or a refusal.
+A component that is not on offer at that version, not installed, or whose
+signed hash or signature does not verify is refused by the worker and
+reported through `updater.status` as `refused`; a bundle the steward does
+not admit is restored and reported as `rolled_back`.
+"""
+
+[[requests]]
+request_type = "updater.channel.set"
+description = """
+Record the channel. Payload is `{ v: 1, channel }`, `channel` one of
+`alpha`, `test` or `production`. Answers `{ v: 1, accepted, op:
+"channel" }` or a refusal. It changes which registry the next check reads
+and nothing else.
+"""
+
+[[requests]]
+request_type = "updater.status"
+description = """
+Read the updater's state. Payload is `{ v: 1 }`. Answers `{ v: 1, channel,
+state, op?, component?, version?, started_at_utc?, finished_at_utc?,
+error?, summary?, inventory }`. `state` is `idle` before any run,
+`starting` from an accepted request until the helper records a newer run,
+then the helper's own: `checked`, `applying`, `applied`, `refused`,
+`rolled_back` or `channel_set`. `inventory` is the last check, `{ v,
+channel, checked_at_utc, items, host_files }`, or null; each item is
+`{ component, kind (plugin | host-files), installed_version,
+available_version, installed_bytes (known | unknown), reason (newer |
+rebuild | unknown_bytes | no_record | release_newer | drift) }`.
+"""
+
+[[requests]]
+request_type = "updater.history"
+description = """
+Read the last runs of apply and channel requests, newest first. Payload is
+`{ v: 1, limit? }`, `limit` 1 to 50 (default 20). Answers `{ v: 1, entries
+}`, each the run's recorded status.
+"""
+
+[[requests]]
+request_type = "updater.channel.get"
+description = """
+Read the recorded channel. Payload is `{ v: 1 }`. Answers `{ v: 1, channel
+}`: `alpha`, `test` or `production`, `production` until one is set.
+"""
+
+[[acceptance]]
+name = "updater-verbs-that-start-work-answer-at-once-and-take-only-a-name-a-version-or-a-channel"
+detail = "`updater.check`, `updater.apply` and `updater.channel.set` are writes at `system_admin` and answer `{ v: 1, accepted, op }` or `{ v: 1, accepted: false, error }` without waiting for the work. `updater.apply` takes only `component` and `version`; a component that is not an `org.evoframework.*` name or `evo-host-files`, a version that is not dotted digits, or a channel that is not `alpha`, `test` or `production` is refused before anything is requested. No payload field is a path, a URL or a key."
+
+[[acceptance]]
+name = "updater-installs-only-what-a-signed-document-and-a-hash-named"
+detail = "An applied component was named by a registry or host-files document whose detached signature verified under a trust key authorised for its names, whose pinned fingerprint is that key's, and which had not expired; its bytes matched the signed `sha256`; and every file the carrier holds was listed by the document and on the box's own allow list. A document that fails any of these installs nothing and the run ends `refused` with the reason."
+
+[[acceptance]]
+name = "updater-apply-keeps-the-previous-bundle-never-touches-plugin-state-and-restores-on-failure"
+detail = "An apply of a plugin copies the installed bundle to a rollback directory, replaces the bundle by rename, and restarts the steward. It never reads, writes, moves or removes the plugin's `state/` or `credentials/`. If the plugin is not admitted again within the bound, the previous bundle is restored, the steward restarted, and the run ends `rolled_back`; the failed version is not recorded as applied."
+
+[[acceptance]]
+name = "updater-status-reports-starting-until-the-helper-records-a-newer-run"
+detail = "From an accepted request until the helper records a run that started at or after that request, `updater.status` answers `state: starting` and none of the earlier run's end, error or summary. The reads write nothing."

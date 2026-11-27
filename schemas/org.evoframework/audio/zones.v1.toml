@@ -38,8 +38,10 @@ every zone answer. The shelf publishes one subject,
 `eq_only` cascade hears, if any; `eq_only` stays the one pipe.
 A scene is a name and a snapshot of every zone: `scene.save`
 stores the zones as they are under a name, `scene.list` reads
-the names back, `scene.recall` makes a snapshot's zones the
-live zones, and `scene.remove` takes a scene away.
+the names back, `scene.get` reads one scene whole,
+`scene.put` stores a scene as it is given, `scene.recall`
+makes a snapshot's zones the live zones, and `scene.remove`
+takes a scene away.
 """
 
 # ----- Shared rules -----
@@ -58,7 +60,7 @@ live zones, and `scene.remove` takes a scene away.
 #
 # Every zone answer is `{ id, name, logical_output_ids, eq }`.
 # `eq` is `{ engaged, bands }`: `engaged` is a bool and starts
-# false; `bands` is exactly 10, index 0 through 9. Each band is
+# false; `bands` is 1 through 31. Each band is
 # `{ freq_hz, gain_db, q }` with `freq_hz` 20 through 20000,
 # `gain_db` -15.0 through 15.0, and `q` 0.1 through 30.0 — the
 # same ranges as the global EQ on `audio.options`, stated once
@@ -164,6 +166,8 @@ does not render the zone EQ.
 # characters, and unique among scenes without regard to case;
 # a verb that takes a name matches it that way. At most 32
 # scenes exist. Scenes are listed in the order first saved.
+# `scene.get` and `scene.put` read and store a scene without
+# applying it, so a client can carry one between devices.
 # Scenes are kept in the plugin's state in their own file,
 # apart from the zones, and survive a restart. A missing file
 # is no scenes; a file that does not parse is no scenes, and
@@ -191,6 +195,43 @@ description = """
 Read the scene names back. Payload is `{ v: 1 }`. Answers
 `{ v: 1, scenes: [string] }`, every scene's name in the order
 first saved; an empty set is `[]`. The read changes nothing.
+"""
+
+[[requests]]
+request_type = "scene.get"
+description = """
+Read one scene whole. Payload is `{ v: 1, name: string }`; the
+name is matched without regard to case, and an unknown name is
+refused. Answers `{ v: 1, scene: { name, zones } }`, the scene
+as it is stored. The read changes nothing: no zone, no scene,
+and no `eq_claim` publish.
+"""
+
+[[requests]]
+request_type = "scene.put"
+description = """
+Store a scene as it is given. Payload is
+`{ v: 1, scene: { name, zones }, overwrite?: bool }`, with
+`overwrite` false when absent. Answers
+`{ v: 1, scene: { name, zones } }`, the scene stored. Before any
+write the scene is checked, and any refusal leaves the scenes
+and their file as they were: the name is trimmed, non-empty and
+at most 64 characters; a name a scene already holds, without
+regard to case, is refused unless `overwrite` is true, in which
+case that scene is replaced in place with the spelling just
+given; the 33rd scene is refused. Each zone has an id of the form
+`zone:<n>` and a name that is trimmed, non-empty and at most 64
+characters; ids are unique in the scene, and names are unique in
+it without regard to case. Each zone holds at least one logical
+output, each one `delivery.list_logical_outputs` returns now,
+named once in the zone and in no other zone of the scene. Each
+zone's EQ has 1 through 31 bands with every field in the range
+the shared rules state; the gain is kept to 0.1 dB and the Q to
+0.01. The scene's zones are stored as they are given, ids
+included. The live zones, the logical outputs, the physical
+outputs, the options EQ and the `eq_claim` stay as they are;
+nothing is recalled. A scene put can be recalled afterwards
+under the recall's own rules.
 """
 
 [[requests]]
@@ -236,7 +277,7 @@ Which zone's EQ the one `eq_only` cascade hears. The state is
 one of two shapes. `{ v: 1, claimed: false }` means the options
 EQ sounds. `{ v: 1, claimed: true, zone_id, engaged: true,
 bands }` means the one `eq_only` cascade in composition.alsa
-uses those bands, engaged; `bands` is exactly 10, each
+uses those bands, engaged; `bands` is 1 through 31, each
 `{ freq_hz, gain_db, q }` in the ranges the shared rules state.
 Any other shape, and an absent subject, mean the options EQ.
 
@@ -274,8 +315,8 @@ detail = "Ids are `zone:<n>`, minted in creation order, and never reused after a
 
 [[acceptance]]
 name = "zones-eq-stored-and-heard-through-eq-claim"
-detail = "A zone carries a name, a membership and its own EQ: `engaged` starting false and exactly 10 bands in the ranges the shared rules state, starting flat. `zone.set_eq_engaged` and `zone.set_eq_band` set it; every zone answer carries it; a missing EQ loads as the default, a short band list is padded flat and a long one is cut to 10. An unknown zone, an index outside 0 through 9 and a field outside its range are refused before any write, naming the field. The plugin stores and answers the zone EQ and publishes the `eq_claim` subject; the one `eq_only` cascade in composition.alsa hears the claimed zone's bands from that subject while the claim is true, and the options EQ otherwise. There is one cascade."
+detail = "A zone carries a name, a membership and its own EQ: `engaged` starting false and 1 through 31 bands in the ranges the shared rules state, starting flat (default length is the plugin's flat default). `zone.set_eq_engaged`, `zone.set_eq_band` and `zone.remove_eq_band` set it; every zone answer carries it; a missing EQ loads as the default. An unknown zone, an index outside the current band list (or past 30 on add), and a field outside its range are refused before any write, naming the field. The plugin stores and answers the zone EQ and publishes the `eq_claim` subject; the one `eq_only` cascade in composition.alsa hears the claimed zone's bands from that subject while the claim is true, and the options EQ otherwise. There is one cascade."
 
 [[acceptance]]
 name = "zones-scene-is-a-snapshot-of-every-zone"
-detail = "A scene is `{ name, zones }`, each zone the zone object `{ id, name, logical_output_ids, eq }`; it holds no playing terminus, no options EQ and no logical output. `scene.save` stores the zones as they are under a trimmed, non-empty name of at most 64 characters, unique among scenes without regard to case; saving a name that exists replaces that scene in place with the spelling just given, and the 33rd scene is refused with nothing written. `scene.list` answers the names in first-saved order, `[]` when there are none. `scene.remove` answers the scene taken away and refuses an unknown name; the live zones stay. `scene.recall` replaces the live zones with the snapshot, keeping its ids; the next id becomes one past the highest `zone:<n>` then present and does not move backward; an empty snapshot clears the live zones. An unknown name, and a snapshot naming a logical output the plugin does not have, one twice in one zone, one in two zones, or a zone with an empty membership, are refused before any write and the live zones stay. A snapshot's zone names are not checked again. Recall leaves the logical outputs, the physical outputs and the options EQ, and `eq_claim` is published again from the restored zones under that subject's rule. Scenes persist in their own file: a missing file is no scenes, and a file that does not parse is no scenes with the live zones untouched."
+detail = "A scene is `{ name, zones }`, each zone the zone object `{ id, name, logical_output_ids, eq }`; it holds no playing terminus, no options EQ and no logical output. `scene.save` stores the zones as they are under a trimmed, non-empty name of at most 64 characters, unique among scenes without regard to case; saving a name that exists replaces that scene in place with the spelling just given, and the 33rd scene is refused with nothing written. `scene.list` answers the names in first-saved order, `[]` when there are none. `scene.get` answers one scene whole and changes nothing. `scene.put` stores a scene as given, after checking its name, its zone ids and names, its membership against the logical outputs now and its EQ, refuses a name already held unless `overwrite` is true and the 33rd scene, and leaves the live zones, the logical outputs, the options EQ and the `eq_claim` untouched; a scene refused is not stored and its file does not change. `scene.remove` answers the scene taken away and refuses an unknown name; the live zones stay. `scene.recall` replaces the live zones with the snapshot, keeping its ids; the next id becomes one past the highest `zone:<n>` then present and does not move backward; an empty snapshot clears the live zones. An unknown name, and a snapshot naming a logical output the plugin does not have, one twice in one zone, one in two zones, or a zone with an empty membership, are refused before any write and the live zones stay. A snapshot's zone names are not checked again. Recall leaves the logical outputs, the physical outputs and the options EQ, and `eq_claim` is published again from the restored zones under that subject's rule. Scenes persist in their own file: a missing file is no scenes, and a file that does not parse is no scenes with the live zones untouched."

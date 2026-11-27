@@ -46,3 +46,7 @@ current_shape = 1
 [[shelves]]
 name = "locale"
 current_shape = 1
+
+[[shelves]]
+name = "updater"
+current_shape = 1

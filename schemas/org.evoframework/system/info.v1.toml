@@ -48,7 +48,12 @@ cores }, memory_total_bytes, uptime_s }`:
 `/proc/sys/kernel/osrelease`; `architecture` as the machine name
 uname reports; `model` from `/proc/device-tree/model`, then the
 DMI vendor and product under `/sys/class/dmi/id/` when there is
-no device tree; `cpu` from `/proc/cpuinfo`; `memory_total_bytes`
+no device tree; `cpu` from `/proc/cpuinfo`: `cpu.model` is the
+first `model name`, or, where the kernel writes none (an Arm
+kernel), the Arm Ltd core the first `CPU implementer` (`0x41`) and
+`CPU part` name, such as `Cortex-A76`, and is null for a part not
+known; `cpu.cores` is the number of `processor` lines;
+`memory_total_bytes`
 from `MemTotal` in `/proc/meminfo`; `uptime_s` from
 `/proc/uptime`. Each field whose source is missing or unreadable
 is null.
@@ -72,4 +77,4 @@ no such record.
 # MUST meet.
 [[acceptance]]
 name = "system-info-reads-the-host-and-answers-null-for-what-is-missing"
-detail = "`get_system_info { v: 1 }` answers `{ v: 1, hostname, os, kernel, architecture, model, cpu: { model, cores }, memory_total_bytes, uptime_s }` from the host sources the request names, with `model` from `/proc/device-tree/model` first and the DMI vendor and product under `/sys/class/dmi/id/` only when there is no device tree. `get_system_version { v: 1 }` answers `{ v: 1, release, build, architecture, built_at_utc }`: `release` is the installed release or null and is never the three-part Cargo package version or a UI runtime's health version; `build` is the workspace version the plugin was compiled from; `architecture` and `built_at_utc` come from the installer's record on the box or are null. A missing or unreadable source answers null for its field and the verb still answers. Neither verb writes anything. There is no display-name field."
+detail = "`get_system_info { v: 1 }` answers `{ v: 1, hostname, os, kernel, architecture, model, cpu: { model, cores }, memory_total_bytes, uptime_s }` from the host sources the request names, with `model` from `/proc/device-tree/model` first and the DMI vendor and product under `/sys/class/dmi/id/` only when there is no device tree. `cpu.model` is the first `model name` in `/proc/cpuinfo`; where there is none, it is the Arm Ltd core named by the first `CPU implementer` and `CPU part` when the implementer is `0x41` and the part is a core the plugin knows, and null otherwise. A part number is never answered as a name, and another implementer's part is never read as an Arm Ltd core. `get_system_version { v: 1 }` answers `{ v: 1, release, build, architecture, built_at_utc }`: `release` is the installed release or null and is never the three-part Cargo package version or a UI runtime's health version; `build` is the workspace version the plugin was compiled from; `architecture` and `built_at_utc` come from the installer's record on the box or are null. A missing or unreadable source answers null for its field and the verb still answers. Neither verb writes anything. There is no display-name field."

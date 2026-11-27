@@ -33,31 +33,93 @@ is at most 16 MiB as compact JSON.
 # A backup is `{ v: 1, config, playlists, settings }`. Each part
 # is the owner's own answer shape:
 #
-# - `config`: `{ logical_outputs, zones }`. `logical_outputs` is
-#   the list `delivery.list_logical_outputs` answers on
-#   `audio.delivery`; `zones` is the list `zone.list` answers on
-#   `audio.zones`, each zone with its EQ. A zone's membership
-#   names logical outputs by the ids this backup carries.
+# - `config`: `{ logical_outputs, zones, scenes }`.
+#   `logical_outputs` is the list `delivery.list_logical_outputs`
+#   answers on `audio.delivery`; `zones` is the list `zone.list`
+#   answers on `audio.zones`, each zone with its EQ; `scenes` is
+#   every scene `scene.list` names on `audio.zones`, each as
+#   `scene.get` answers it, `{ name, zones }`. A zone's, and a
+#   scene zone's, membership names logical outputs by the ids
+#   this backup carries. A backup without `scenes` puts back no
+#   scene.
 # - `playlists`: `[{ name, m3u }]`, every stored playlist from
 #   `playlist.list_playlists` on `audio.playlist`, with `m3u` the
 #   text `playlist.export_file` answers for that name with format
 #   `m3u` and library-relative rows.
-# - `settings`: `{ record, eq_presets }`. `record` is the
-#   settings `options.get_settings` answers on `audio.options`;
-#   `eq_presets` is the library `options.list_eq_presets`
-#   answers.
+# - `settings`: `{ record, eq_presets, locale, alarm }`. `record`
+#   is the settings `options.get_settings` answers on
+#   `audio.options`; `eq_presets` is the library
+#   `options.list_eq_presets` answers; `locale` is
+#   `{ language, timezone }` as `language.get` and `timezone.get`
+#   answer them on `system.locale`; `alarm` is
+#   `{ weekdays, time, playlist_name }` as `alarm.get` answers it
+#   on `audio.alarm`, or `null` when no alarm is set. A backup
+#   without a `locale` key sets neither the language nor the
+#   zone, and one without an `alarm` key sets no alarm.
 #
 # Import adds and sets; it removes nothing the device already
-# has. It runs config first (logical outputs, then zones), then
-# settings, then playlists. A zone's membership is remapped to
-# the logical output ids the device mints as each output is
-# added back. An item its owner refuses, such as a logical
-# output that names hardware this device does not have, a zone
-# or playlist whose name the device already holds, or an
-# `output_device` this device does not have, is reported and
-# skipped; nothing is put in its place, and the other items
-# still go back. `composition_mode` in the settings record is not
-# put back: the composition plugin writes it.
+# has. It runs config first (logical outputs, then zones, then
+# scenes), then settings (the record, the EQ presets, then the
+# language and the zone), then playlists, then the alarm. A
+# zone's membership is remapped to the logical output ids the
+# device mints as each output is added back. An item its owner
+# refuses, such as a logical output that names hardware this
+# device does not have, or a zone, playlist or favourite the
+# device already holds, is reported and skipped; nothing is put
+# in its place, and the other items still go back.
+# `composition_mode` in the settings record is not put back: the
+# composition plugin writes it.
+#
+# Scenes go back after the zones, each through `scene.put` on
+# `audio.zones` with `overwrite` false: never over a scene the
+# device holds. A scene's logical output ids are mapped to the
+# ids the device minted as each output was added back; its zone
+# ids are kept. A scene that names a logical output that did not
+# go back is reported as `scene <name>` and not put. A restore
+# never recalls, saves or removes a scene, so the live zones are
+# the zones the import put back and nothing else.
+#
+# Three playlist cases are put back by their owner's own verb,
+# not `playlist.import_file`:
+#
+# - The playlist named `__favourites__` is the favourites list.
+#   Each of its rows goes back through `favourites.add_favourite`
+#   on `audio.favourites`, in order; a favourite the device
+#   already holds is not a refusal. A row its owner refuses is
+#   reported as `favourite <row>`.
+# - A playlist with no rows goes back as an empty playlist
+#   through `playlist.create_playlist` on `audio.playlist`.
+# - Every other playlist goes back through `playlist.import_file`
+#   with format `m3u`, its text and `overwrite` false.
+#
+# `output_device` in the settings record goes back only if the
+# device has that output. The plugin reads `delivery.list_outputs`
+# on `audio.delivery` and resolves the descriptor as the delivery
+# plugin does: the output's `hw:N,M` id, or the same device index
+# on a card named by its name, short id or index
+# (`hw:CARD=<id>,DEV=<M>` and the bare card forms included). The
+# empty string, which means the default, always goes back. An
+# output the device lacks, or an output list it cannot read, is
+# reported as `output_device` and the device's own value stays.
+# The setter itself does not check; this is the backup's own
+# guard until it does.
+#
+# The language and the zone go back only when the device does not
+# already hold them: import reads `language.get` and
+# `timezone.get` first, and sends nothing for an equal value, so a
+# restore onto a device in the same zone applies and reports
+# nothing. The language goes back through `language.set`; a tag
+# the glass has no catalogue for does not apply (the owner answers
+# the language in force, not an error), and import reports it as
+# `language`, naming the language in force. The zone is attempted
+# through `timezone.set` on `system.locale`. That verb is a write
+# at `system_admin`, and a request the plugin dispatches runs as
+# the framework's plugin principal, which does not hold that
+# grant; the owner refuses it, and import reports the zone as
+# `timezone` with the owner's reason and the zone from the
+# backup, and leaves the device's own zone. A zone the host does
+# not hold is reported the same way. A client that holds the
+# operator's own session can apply the zone the report names.
 #
 # A backup is at most 16 MiB, 16 x 1 048 576 bytes. The size is
 # the backup object `{ v, config, playlists, settings }` written
@@ -72,8 +134,9 @@ request_type = "export_backup"
 description = """
 Read the three domains into one backup. Payload is `{ v: 1 }`.
 Answers `{ v: 1, backup: { v: 1, config: { logical_outputs,
-zones }, playlists: [{ name, m3u }], settings: { record,
-eq_presets } } }`, each part as the shared rules above state.
+zones, scenes }, playlists: [{ name, m3u }], settings: { record,
+eq_presets, locale, alarm } } }`, each part as the shared rules above
+state.
 The read changes nothing. If an owner cannot answer, the export
 is refused; a backup is never answered with a domain left out.
 If the backup, written as compact UTF-8 JSON, is over 16 MiB, the
@@ -89,13 +152,19 @@ as `export_backup` answers it. A backup that, written as compact
 UTF-8 JSON, is over 16 MiB is refused as Permanent before its
 version is checked and before anything is written. A backup whose
 own `v` is not 1 is refused before anything is written. Logical outputs go back
-through `delivery.add_logical_output`; zones through `zone.add`,
-then `zone.set_eq_engaged` and `zone.set_eq_band`; the settings
+through `delivery.add_logical_output`;
+zones through `zone.add`, then `zone.set_eq_engaged` and
+`zone.set_eq_band`; scenes through `scene.put`; the settings
 record through the matching `options.set_*` verbs, except
-`composition_mode`; the EQ presets through
-`options.save_eq_preset`; and each playlist through
+`composition_mode`, with `output_device` only if the device has
+that output; the EQ presets through `options.save_eq_preset`;
+the language through `language.set` and the zone through
+`timezone.set`, each only when the device does not already hold
+it; the favourites list (the playlist `__favourites__`) row by row
+through `favourites.add_favourite`; a playlist with no rows
+through `playlist.create_playlist`; every other playlist through
 `playlist.import_file` with format `m3u`, its text, and
-`overwrite` false. Answers `{ v: 1, refused: [{ domain, item,
+`overwrite` false; and last the alarm through `alarm.set`. Answers `{ v: 1, refused: [{ domain, item,
 reason }] }`: every item an owner refused, with the owner's
 reason; an empty list means every item went back.
 """
@@ -104,8 +173,20 @@ reason; an empty list means every item went back.
 # MUST meet.
 [[acceptance]]
 name = "backup-goes-through-the-owners-and-reports-what-they-refuse"
-detail = "`export_backup { v: 1 }` answers `{ v: 1, backup: { v: 1, config, playlists, settings } }`: `config` as `{ logical_outputs, zones }` from `delivery.list_logical_outputs` and `zone.list`; `playlists` as `[{ name, m3u }]` from `playlist.list_playlists` and `playlist.export_file` with format `m3u` and library-relative rows; `settings` as `{ record, eq_presets }` from `options.get_settings` and `options.list_eq_presets`. An owner that cannot answer refuses the export. `import_backup { v: 1, backup }` refuses a backup whose own `v` is not 1 before any write, then puts config, settings and playlists back, in that order, through `delivery.add_logical_output`, `zone.add`, `zone.set_eq_engaged`, `zone.set_eq_band`, the `options.set_*` verbs except `composition_mode`, `options.save_eq_preset` and `playlist.import_file` with `overwrite` false, remapping zone membership to the logical output ids the device mints. Import removes nothing the device has. Each item an owner refuses, a missing device among them, is answered in `refused` with its domain, the item and the owner's reason, and nothing is put in its place. The plugin reads no other plugin's state directory or credentials. No backup contains the music files or a share password."
+detail = "`export_backup { v: 1 }` answers `{ v: 1, backup: { v: 1, config, playlists, settings } }`: `config` as `{ logical_outputs, zones, scenes }` from `delivery.list_logical_outputs`, `zone.list`, `scene.list` and `scene.get`; `playlists` as `[{ name, m3u }]` from `playlist.list_playlists` and `playlist.export_file` with format `m3u` and library-relative rows; `settings` as `{ record, eq_presets, locale, alarm }` from `options.get_settings`, `options.list_eq_presets`, `language.get`, `timezone.get` and `alarm.get`. An owner that cannot answer refuses the export. `import_backup { v: 1, backup }` refuses a backup whose own `v` is not 1 before any write, then puts config, settings, playlists and the alarm back, in that order, through `delivery.add_logical_output`, `zone.add`, `zone.set_eq_engaged`, `zone.set_eq_band`, `scene.put` with `overwrite` absent or false, the `options.set_*` verbs except `composition_mode`, `options.save_eq_preset`, `language.set` and `timezone.set` (each only when the device does not already hold the value), `favourites.add_favourite` for the playlist `__favourites__`, `playlist.create_playlist` for a playlist with no rows, `playlist.import_file` with `overwrite` false for every other playlist, and `alarm.set`, remapping zone membership to the logical output ids the device mints. `output_device` goes back only if `delivery.list_outputs` names that output. Import removes nothing the device has. Each item an owner refuses, a missing device among them, is answered in `refused` with its domain, the item and the owner's reason, and nothing is put in its place. The plugin reads no other plugin's state directory or credentials. No backup contains the music files or a share password."
+
+[[acceptance]]
+name = "the-language-and-the-zone-go-back-when-the-device-differs-and-are-reported-when-they-do-not"
+detail = "A backup's `settings.locale` is `{ language, timezone }` as `language.get` and `timezone.get` answer them. On import the language goes back through `language.set` and the zone through `timezone.set`, after the settings record and the EQ presets and before the playlists and the alarm, and only when the device does not already hold the value; an equal value sends nothing and reports nothing. A language the glass has no catalogue for is answered by the owner as the language in force and is reported in `refused` as `language`. A zone the owner refuses, including because a dispatched call does not carry `system_admin`, or does not apply because the host does not hold it, is reported in `refused` as `timezone` with the zone from the backup, and the device's own zone stays. A backup without `locale` sets neither."
 
 [[acceptance]]
 name = "a-backup-is-at-most-16-mib"
 detail = "The bound is 16 MiB, 16 x 1 048 576 bytes, measured on the backup object `{ v, config, playlists, settings }` written as compact UTF-8 JSON: not the request or response around it, and not the text the glass shows. `export_backup` reads the three domains and, if the backup is over the bound, refuses as Permanent and answers no backup; it never truncates one. `import_backup` refuses a backup over the bound as Permanent before its version is checked and before anything is written. A wrong `v` and a backup that does not parse stay Permanent refusals, and an owner that cannot answer still refuses the whole export as Transient."
+
+[[acceptance]]
+name = "favourites-empty-playlists-the-alarm-and-the-output-go-back-by-their-owners"
+detail = "A backup whose playlists include `__favourites__` puts each of its rows back through `favourites.add_favourite` and never sends that name to `playlist.import_file`, which refuses it. A playlist with no rows goes back through `playlist.create_playlist`, not `playlist.import_file`, which refuses a file with no rows. A backup with an `alarm` sets it through `alarm.set` after the playlists, and a backup without the key sets none. `output_device` is sent to `options.set_output_device` only when it is empty or `delivery.list_outputs` names that output; otherwise it is answered in `refused` as `output_device` and the device's own value stays. None of this adds a verb that removes anything."
+
+[[acceptance]]
+name = "scenes-go-back-by-put-and-are-never-recalled"
+detail = "A backup's scenes are read with `scene.list` and `scene.get`, and go back after the zones through `scene.put` with `overwrite` false, with each scene's logical output ids mapped to the ids the device minted; a scene that names a logical output that did not go back, or whose name the device holds, is answered in `refused` as `scene <name>` and not put. A restore sends no `scene.save`, `scene.recall` or `scene.remove`, and the live zones are those the zones import put back. A backup without `scenes` puts back none."

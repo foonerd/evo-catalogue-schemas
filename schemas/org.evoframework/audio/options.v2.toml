@@ -492,6 +492,7 @@ A second set replaces the armed timer. A volume change during
 the fade is overridden by the next step, and the restore is
 still the pre-fade level. If the volume cannot be read, the
 timer pauses and leaves the volume alone.
+`options.get_sleep_timer` reads the timer.
 
 The timer is not a setting. Nothing is written to the options
 file, no happening is emitted, and the settings subject does
@@ -500,6 +501,21 @@ a fade is under way; a fresh load has no timer. A crash, or a
 shutdown that does not run that unload, during the fade can
 leave the volume part-way down. This is not crossfade, and it
 does not program the RTC.
+"""
+
+[[requests]]
+request_type = "options.get_sleep_timer"
+description = """
+Read the one sleep timer. Payload is `{ v: 1 }`. Answers `{ v: 1, armed,
+phase, seconds_remaining, fade_ms }`. With no timer waiting or fading:
+`armed` is false and the other three fields are null. While the timer
+waits: `armed` is true, `phase` is `"waiting"`, `seconds_remaining` is the
+whole seconds until the fade begins, rounded up, and so never 0 while it
+waits, and `fade_ms` is the fade length as set. From the first step of the
+fade: `phase` is `"fading"` and `seconds_remaining` is 0. A timer that has
+paused playback, been cancelled, or been cancelled by a restart is not
+armed. The read arms, cancels, writes and sends nothing, and moves no
+subject; it carries no gate.
 """
 
 # Acceptance criteria a plugin claiming to satisfy this
@@ -606,7 +622,11 @@ detail = "`recall_eq_preset` replaces all 10 active eq_bands atomically and emit
 
 [[acceptance]]
 name = "sleep-timer-fades-pauses-and-restores"
-detail = "`options.set_sleep_timer { v: 1, seconds: u32, fade_ms: u32 }` answers `{ v: 1, status: \"ok\" }`, with no cap on either field. There is one timer: a second set replaces the armed one, and `seconds` 0 cancels. After `seconds` the global volume falls to silence over `fade_ms`, playback pauses, and the volume returns to the level it had when the fade began. A cancel during the fade restores that level and does not pause. A volume change during the fade is overridden by the next step; the restore is still the pre-fade level. If the volume cannot be read, the timer pauses and leaves the volume alone. The timer is not a setting: it writes nothing to the options file, emits no happening, and does not move the settings subject, so `options-persists-on-write` does not apply to it. Unload cancels the timer and restores the volume if a fade is under way; a fresh load has no timer. A crash, or a shutdown that does not run that unload, during the fade can leave the volume part-way down. The timer is not crossfade and leaves `crossfade_seconds` as it is; it does not program the RTC."
+detail = "`options.set_sleep_timer { v: 1, seconds: u32, fade_ms: u32 }` answers `{ v: 1, status: \"ok\" }`, with no cap on either field. There is one timer: a second set replaces the armed one, and `seconds` 0 cancels. After `seconds` the global volume falls to silence over `fade_ms`, playback pauses, and the volume returns to the level it had when the fade began. A cancel during the fade restores that level and does not pause. A volume change during the fade is overridden by the next step; the restore is still the pre-fade level. If the volume cannot be read, the timer pauses and leaves the volume alone. The timer is not a setting: it writes nothing to the options file, emits no happening, and does not move the settings subject, so `options-persists-on-write` does not apply to it. Unload cancels the timer and restores the volume if a fade is under way; a fresh load has no timer. A crash, or a shutdown that does not run that unload, during the fade can leave the volume part-way down. The timer is not crossfade and leaves `crossfade_seconds` as it is; it does not program the RTC. `options.get_sleep_timer` reads the timer."
+
+[[acceptance]]
+name = "sleep-timer-can-be-read-without-touching-it"
+detail = "`options.get_sleep_timer { v: 1 }` answers `{ v: 1, armed, phase, seconds_remaining, fade_ms }`: `armed: false` with the other fields null when no timer waits or fades; `phase: \"waiting\"` with `seconds_remaining` the whole seconds to the fade, rounded up and never 0, and `fade_ms` as set; `phase: \"fading\"` with `seconds_remaining` 0 from the first fade step. A timer that has paused, been cancelled, or been cancelled by a restart is not armed. The read sends `audio.playback` nothing, arms and cancels nothing, writes nothing and emits no happening, so a run of reads leaves the timer's behaviour exactly as an unread run's. An unknown payload version is refused."
 
 # NOTE: payload_in / payload_out for the eight request
 # types are marked `tbd-review` pending plugin-author
